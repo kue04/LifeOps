@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+lifeops.sqlite3
+data/geocode_cache.json
+.git/
+.pytest_cache/
+.mypy_cache/

@@ -1,0 +1,48 @@
+services:
+  api:
+    build:
+      context: .
+    ports:
+      - "8000:8000"
+    environment:
+      LIFEOPS_DB_PATH: /app/data/lifeops.sqlite3
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LIFEOPS_LLM_MODE: ${LIFEOPS_LLM_MODE:-mock}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      WEATHER_PROVIDER: ${WEATHER_PROVIDER:-mock}
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:-}
+      PLACE_PROVIDER: ${PLACE_PROVIDER:-mock}
+      AMAP_API_KEY: ${AMAP_API_KEY:-}
+      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-mock}
+      BOCHA_API_KEY: ${BOCHA_API_KEY:-}
+      SEARCH_FRESHNESS: ${SEARCH_FRESHNESS:-noLimit}
+      SEARCH_SUMMARY: ${SEARCH_SUMMARY:-true}
+      SEARCH_COUNT: ${SEARCH_COUNT:-8}
+      SEARCH_INCLUDE: ${SEARCH_INCLUDE:-}
+      SEARCH_EXCLUDE: ${SEARCH_EXCLUDE:-}
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+    volumes:
+      - lifeops_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  front:
+    build:
+      context: ../lifeops-front
+      args:
+        VITE_LIFEOPS_API_BASE: ${VITE_LIFEOPS_API_BASE:-http://localhost:8000}
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  lifeops_data:

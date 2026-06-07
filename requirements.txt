@@ -1,0 +1,7 @@
+streamlit>=1.35
+fastapi>=0.111
+uvicorn>=0.30
+pydantic>=2.7
+openai>=1.0
+requests>=2.32
+langgraph>=0.2

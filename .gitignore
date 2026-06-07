@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+lifeops.sqlite3
+.env
+data/geocode_cache.json
+.venv/
+venv/
+*.sqlite3
+*.db
+streamlit.log
+streamlit.err.log
+dist/
+node_modules/
