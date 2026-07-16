@@ -29,6 +29,8 @@ def critic_node(state: AgentState) -> AgentState:
         review=str(state.reflection.get("review") or "已完成计划复核"),
     )
     state.critic_decision = decision.model_dump()
+    if state.final_plan is not None:
+        state.final_plan["critic"] = state.critic_decision
     state.reflection["next_action"] = "replan" if decision.next_action == "revise" else decision.next_action
     state.reflection["revision_targets"] = targets
     return state
