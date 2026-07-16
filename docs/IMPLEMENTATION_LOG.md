@@ -24,6 +24,7 @@
 | `5fb628f` | 增加 Pydantic Agent Contract、受控 Supervisor 与规则回退 |
 | `0e2c234` | 增加 Specialist LangGraph 子图、Composer、Critic 与定向修订 |
 | `d6d473b` | 持久化 Critic 元数据，增加 `LIFEOPS_AGENT_MODE` |
+| `51fcd88` | 修复偏好删除重规划，增加离线评估并完成架构、展示与实施文档 |
 
 ## 前端升级提交
 
