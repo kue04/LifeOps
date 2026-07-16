@@ -85,7 +85,7 @@ class RunLifeOpsContractTest(unittest.TestCase):
             patch.object(graph, "load_trace", lambda _trace_id: []):
             result = graph.run_lifeops("周六杭州玩一天")
 
-        self.assertEqual(SUCCESS_KEYS, set(result))
+        self.assertTrue(SUCCESS_KEYS.issubset(set(result)))
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["task_id"], "task_contract")
         self.assertIsInstance(result["trace_id"], str)

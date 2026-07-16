@@ -294,13 +294,14 @@ def load_memory(state: AgentState) -> AgentState:
     explicit_dislikes = list(state.constraints.get("avoid") or [])
     explicit_like_set = set(explicit_likes)
     explicit_dislike_set = set(explicit_dislikes)
+    use_profile_defaults = not explicit_likes and not explicit_dislikes and not _looks_like_travel_request(state.user_input)
     profile_likes = [
         item for item in state.user_profile.get("likes", [])
-        if item not in disabled_likes and item not in explicit_dislike_set
+        if use_profile_defaults and item not in disabled_likes and item not in explicit_dislike_set
     ]
     profile_dislikes = [
         item for item in state.user_profile.get("dislikes", [])
-        if item not in disabled_dislikes and item not in explicit_like_set
+        if use_profile_defaults and item not in disabled_dislikes and item not in explicit_like_set
     ]
     session_likes = [item for item in session_likes if item not in explicit_dislike_set]
     session_dislikes = [item for item in session_dislikes if item not in explicit_like_set]
@@ -921,6 +922,13 @@ def final_response(state: AgentState) -> dict[str, Any]:
         "status": "success" if is_final else "partial_success",
         "trace_id": state.trace_id,
         "constraints": state.constraints,
+        "intent_contract": state.intent_contract,
+        "execution_plan": state.execution_plan,
+        "agent_tasks": state.agent_tasks,
+        "planner_meta": state.planner_meta,
+        "agent_runs": state.agent_runs,
+        "memory_resolution": state.memory_resolution,
+        "critic": state.critic_decision,
         "plan_steps": state.plan_steps,
         "tool_results": state.tool_results,
         "candidates": state.candidates,
@@ -4066,6 +4074,14 @@ def _emit_tool_event(
         "output_summary": _compact_payload(output_summary),
         "preview_items": _compact_preview(preview_items),
     }
+    active_agent = getattr(state, "_active_agent", None)
+    active_task_id = getattr(state, "_active_task_id", None)
+    if active_agent:
+        event["agent_name"] = active_agent
+    if active_task_id:
+        event["task_id"] = active_task_id
+    if active_agent or active_task_id:
+        event["revision_round"] = state.revision_round
     if state.replan_context:
         event["details"] = {"round": "auto_replan"}
     if progress is not None:

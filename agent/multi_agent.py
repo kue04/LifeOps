@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import copy
+from datetime import datetime
 from typing import Any
 
 from pydantic import ValidationError
@@ -10,6 +12,8 @@ from agent.prompts import SUPERVISOR_PROMPT
 from agent.state import AgentState
 from config import settings
 from services.llm_client import llm_client
+from tools.budget import estimate_budget
+from tools.route import estimate_route
 
 
 AGENT_OUTPUTS = {
@@ -157,6 +161,213 @@ def supervisor_node(state: AgentState) -> AgentState:
         }
     )
     return state
+
+
+def agent_dispatch_node(state: AgentState) -> AgentState:
+    from agent.contracts import AgentTask
+    from agent.specialists import run_specialist
+
+    all_tasks = [AgentTask.model_validate(item) for item in state.agent_tasks]
+    revision_targets = set(state.replan_context.get("revision_targets") or []) if state.revision_round else set()
+    if revision_targets:
+        state.agent_proposals = [
+            item for item in state.agent_proposals
+            if item.get("agent") not in revision_targets
+        ]
+        state.tool_results = [
+            tool
+            for proposal in state.agent_proposals
+            for tool in proposal.get("tool_results") or []
+        ]
+        tasks = [task for task in all_tasks if task.agent in revision_targets]
+    else:
+        state.agent_proposals = []
+        state.agent_runs = []
+        state.tool_results = []
+        tasks = all_tasks
+    completed: set[str] = {
+        task.task_id for task in all_tasks
+        if task not in tasks
+    }
+    pending = list(tasks)
+    while pending:
+        ready = [task for task in pending if set(task.depends_on).issubset(completed)]
+        if not ready:
+            raise RuntimeError("AgentTask dependency graph cannot be resolved")
+        for task in ready:
+            _emit_agent_event(state, task, "agent_started", "running")
+            proposal, run = run_specialist(state, task)
+            state.agent_proposals.append(proposal.model_dump())
+            state.agent_runs.append(run.model_dump())
+            state.tool_results.extend(proposal.tool_results)
+            state.execution_log.extend(proposal.artifacts.get("execution_log") or [])
+            completed.add(task.task_id)
+            pending.remove(task)
+            _emit_agent_event(
+                state,
+                task,
+                "agent_completed",
+                "done" if proposal.status != "blocked" else "error",
+                {"status": proposal.status, "output_summary": run.output_summary, "warnings": run.warnings},
+            )
+    latest_runs = {}
+    for run in state.agent_runs:
+        latest_runs[run.get("agent")] = run
+    task_by_agent = {task.agent: task for task in all_tasks}
+    state.execution_plan = [
+        {
+            "id": f"{task_by_agent[agent].task_id}:{tool}",
+            "task_id": task_by_agent[agent].task_id,
+            "agent": agent,
+            "tool": tool,
+            "purpose": task_by_agent[agent].objective,
+            "depends_on": task_by_agent[agent].depends_on,
+            "status": "completed" if run.get("status") != "blocked" else "failed",
+        }
+        for agent, run in latest_runs.items()
+        if agent in task_by_agent
+        for tool in run.get("tools_used") or []
+    ]
+    state.plan_steps = [
+        {
+            "step": item.get("purpose"),
+            "tool": item.get("tool"),
+            "agent": item.get("agent"),
+            "task_id": item.get("task_id"),
+            "status": item.get("status"),
+        }
+        for item in state.execution_plan
+    ]
+    state.execution_log.append(
+        {
+            "node": "execute_plan",
+            "summary": "专项 Agent 已完成委派任务",
+            "details": {"agent_runs": state.agent_runs},
+        }
+    )
+    return state
+
+
+def compose_node(state: AgentState) -> AgentState:
+    from agent.nodes import _build_mixed_plan
+
+    proposals = [item for item in state.agent_proposals if item.get("status") != "blocked"]
+    if not proposals:
+        state.final_plan = None
+        return state
+    if len(proposals) == 1:
+        state.final_plan = copy.deepcopy(proposals[0].get("plan_fragment") or {})
+    else:
+        state.artifacts = _merge_proposal_artifacts(proposals, state)
+        state.candidates = list(state.artifacts.get("candidates") or [])
+        task_types = {str(item.get("agent")) for item in proposals}
+        state.final_plan = _build_mixed_plan(state, task_types)
+    if state.final_plan is not None:
+        state.final_plan["intent_contract"] = state.intent_contract
+        state.final_plan["execution_plan"] = state.execution_plan
+        state.final_plan["agent_tasks"] = state.agent_tasks
+        state.final_plan["planner_meta"] = state.planner_meta
+        state.final_plan["agent_runs"] = state.agent_runs
+        state.final_plan["memory_resolution"] = state.memory_resolution
+    state.execution_log.append(
+        {
+            "node": "synthesize_plan",
+            "summary": "Composer 已合并 Agent Proposal",
+            "details": {"proposal_count": len(proposals), "task_type": (state.final_plan or {}).get("task_type")},
+        }
+    )
+    return state
+
+
+def _merge_proposal_artifacts(proposals: list[dict[str, Any]], state: AgentState) -> dict[str, Any]:
+    from agent.nodes import _constrain_mixed_budget
+
+    merged: dict[str, Any] = {
+        "places": [],
+        "meal_candidates": [],
+        "errand_items": [],
+        "confirm_actions": [],
+        "candidates": [],
+        "lifestyle_places": {"foods": [], "hotels": []},
+    }
+    route_places: list[dict[str, Any]] = []
+    for proposal in proposals:
+        artifacts = proposal.get("artifacts") or {}
+        fragment = proposal.get("plan_fragment") or {}
+        for key in ["places", "meal_candidates", "errand_items", "confirm_actions", "candidates"]:
+            merged[key].extend(copy.deepcopy(artifacts.get(key) or fragment.get(key) or []))
+        if artifacts.get("todo"):
+            merged["todo"] = copy.deepcopy(artifacts["todo"])
+        lifestyle = artifacts.get("lifestyle_places") or fragment.get("lifestyle_places") or {}
+        merged["lifestyle_places"]["foods"].extend(copy.deepcopy(lifestyle.get("foods") or []))
+        merged["lifestyle_places"]["hotels"].extend(copy.deepcopy(lifestyle.get("hotels") or []))
+        for key in ["weather", "search_results", "travel_research"]:
+            if artifacts.get(key) and not merged.get(key):
+                merged[key] = copy.deepcopy(artifacts[key])
+        route_places.extend(copy.deepcopy((artifacts.get("route") or {}).get("ordered_places") or []))
+    route_places = _dedupe_places(route_places)
+    route = estimate_route(route_places) if route_places else {"ordered_places": [], "legs": [], "travel_minutes": 0, "provider": "none"}
+    merged["route"] = route
+    budget = estimate_budget(route.get("ordered_places") or [], state.constraints.get("budget"), state.constraints.get("pace"))
+    merged["budget"] = _constrain_mixed_budget(budget, state.constraints.get("budget"))
+    merged["places"] = _dedupe_places(merged["places"])
+    merged["meal_candidates"] = _dedupe_places(merged["meal_candidates"])
+    merged["candidates"] = _dedupe_places(merged["candidates"])
+    merged["lifestyle_places"]["foods"] = _dedupe_places(merged["lifestyle_places"]["foods"])
+    merged["lifestyle_places"]["hotels"] = _dedupe_places(merged["lifestyle_places"]["hotels"])
+    merged["confirm_actions"] = _dedupe_actions(merged["confirm_actions"])
+    return merged
+
+
+def _dedupe_places(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result = []
+    seen = set()
+    for item in items:
+        key = (item.get("name") or item.get("title"), item.get("location"))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
+
+
+def _dedupe_actions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result = []
+    seen = set()
+    for item in items:
+        key = (item.get("type") or item.get("action_type"), item.get("label"))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
+
+
+def _emit_agent_event(
+    state: AgentState,
+    task: AgentTask,
+    summary: str,
+    status: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    callback = getattr(state, "_progress_callback", None)
+    if not callback:
+        return
+    callback(
+        {
+            "trace_id": state.trace_id,
+            "phase": "agent",
+            "parent_node": "execute_plan",
+            "node": f"{task.agent}_agent",
+            "agent_name": task.agent,
+            "task_id": task.task_id,
+            "summary": summary,
+            "details": details or {},
+            "status": status,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "revision_round": state.revision_round,
+        }
+    )
 
 
 def _agent_objective(agent: str, state: AgentState) -> str:

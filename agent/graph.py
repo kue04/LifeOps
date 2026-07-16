@@ -34,6 +34,9 @@ from agent.nodes import (
     travel_tool_router,
 )
 from agent.state import AgentState
+from agent.critic import critic_node
+from agent.multi_agent import agent_dispatch_node, compose_node, supervisor_node
+from config import settings
 from services.trace_logger import load_trace, traced
 from storage.db import save_task_history
 
@@ -41,7 +44,7 @@ from storage.db import save_task_history
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 
-NODES = [
+LEGACY_NODES = [
     ("constraint_extractor", extract_constraints),
     ("date_resolver", normalize_dates),
     ("load_memory", load_memory),
@@ -52,6 +55,20 @@ NODES = [
     ("risk_checker", check_risks_node),
     ("reflection", reflect),
 ]
+
+MULTI_AGENT_NODES = [
+    ("constraint_extractor", extract_constraints),
+    ("date_resolver", normalize_dates),
+    ("load_memory", load_memory),
+    ("need_clarification", check_clarification),
+    ("planner", supervisor_node),
+    ("execute_plan", agent_dispatch_node),
+    ("synthesize_plan", compose_node),
+    ("risk_checker", check_risks_node),
+    ("reflection", critic_node),
+]
+
+NODES = MULTI_AGENT_NODES if settings.agent_mode == "multi_agent" else LEGACY_NODES
 
 
 def run_lifeops(
@@ -425,6 +442,7 @@ def _should_auto_replan(state: AgentState) -> bool:
 
 def _prepare_auto_replan(state: AgentState) -> None:
     state.replan_count += 1
+    state.revision_round = state.replan_count
     state.replan_context = copy.deepcopy(state.reflection)
     state.execution_log.append(
         {
@@ -447,6 +465,11 @@ def _snapshot(state: AgentState) -> dict:
             "constraints": state.constraints,
             "intent_contract": state.intent_contract,
             "execution_plan": state.execution_plan,
+            "agent_tasks": state.agent_tasks,
+            "planner_meta": state.planner_meta,
+            "agent_runs": state.agent_runs,
+            "memory_resolution": state.memory_resolution,
+            "critic_decision": state.critic_decision,
             "artifacts_keys": sorted(state.artifacts.keys()),
             "plan_steps": state.plan_steps,
             "tool_results_count": len(state.tool_results),
