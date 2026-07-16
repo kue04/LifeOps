@@ -60,6 +60,7 @@ class PlanRequest(BaseModel):
     origin_location: str | None = None
     origin_city: str | None = None
     default_city: str | None = None
+    memory_overrides: "MemoryOverrides | None" = None
 
 
 class ReplanRequest(BaseModel):
@@ -68,6 +69,7 @@ class ReplanRequest(BaseModel):
     origin_location: str | None = None
     origin_city: str | None = None
     default_city: str | None = None
+    memory_overrides: "MemoryOverrides | None" = None
 
 
 class RunRequest(BaseModel):
@@ -76,6 +78,14 @@ class RunRequest(BaseModel):
     origin_location: str | None = None
     origin_city: str | None = None
     default_city: str | None = None
+    memory_overrides: "MemoryOverrides | None" = None
+
+
+class MemoryOverrides(BaseModel):
+    disabled_likes: list[str] = Field(default_factory=list)
+    disabled_dislikes: list[str] = Field(default_factory=list)
+    session_likes: list[str] = Field(default_factory=list)
+    session_dislikes: list[str] = Field(default_factory=list)
 
 
 class ItemFeedback(BaseModel):
@@ -549,6 +559,7 @@ def _request_context(request: PlanRequest | ReplanRequest | RunRequest) -> dict[
             "origin_location": request.origin_location,
             "origin_city": request.origin_city,
             "default_city": request.default_city,
+            "memory_overrides": request.memory_overrides.model_dump() if request.memory_overrides else None,
         }.items()
         if value
     }

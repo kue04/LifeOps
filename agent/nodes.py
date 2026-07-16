@@ -229,9 +229,6 @@ def extract_constraints(state: AgentState) -> AgentState:
     raw_preferences = explicit_preferences or ([] if _looks_like_travel_request(text) else llm_constraints.get("preferences") or [])
     preferences = _remove_avoided_preferences(raw_preferences, avoid)
 
-    if "太贵" in text or "控制在" in text:
-        state.replan_count += 1
-
     task_type = _infer_task_type(text, llm_constraints, state.constraints)
     if task_type == "meal" and "美食" not in preferences and "美食" not in avoid:
         preferences = list(dict.fromkeys(preferences + ["美食"]))
@@ -288,15 +285,52 @@ def normalize_dates(state: AgentState) -> AgentState:
 
 def load_memory(state: AgentState) -> AgentState:
     state.user_profile = load_user_profile(state.user_id)
-    avoid = set(state.constraints.get("avoid", []))
-    if (state.constraints.get("task_type") in {None, "travel", "unknown"}
-        and not state.constraints.get("preferences")
-        and not _looks_like_travel_request(state.user_input)):
-        state.constraints["preferences"] = [
-            item for item in state.user_profile.get("likes", []) if item not in avoid
-        ]
+    overrides = state.constraints.get("memory_overrides") or {}
+    disabled_likes = set(overrides.get("disabled_likes") or [])
+    disabled_dislikes = set(overrides.get("disabled_dislikes") or [])
+    session_likes = list(overrides.get("session_likes") or [])
+    session_dislikes = list(overrides.get("session_dislikes") or [])
+    explicit_likes = list(state.constraints.get("preferences") or [])
+    explicit_dislikes = list(state.constraints.get("avoid") or [])
+    explicit_like_set = set(explicit_likes)
+    explicit_dislike_set = set(explicit_dislikes)
+    profile_likes = [
+        item for item in state.user_profile.get("likes", [])
+        if item not in disabled_likes and item not in explicit_dislike_set
+    ]
+    profile_dislikes = [
+        item for item in state.user_profile.get("dislikes", [])
+        if item not in disabled_dislikes and item not in explicit_like_set
+    ]
+    session_likes = [item for item in session_likes if item not in explicit_dislike_set]
+    session_dislikes = [item for item in session_dislikes if item not in explicit_like_set]
+    applied_dislikes = list(dict.fromkeys(explicit_dislikes + session_dislikes + profile_dislikes))
+    applied_likes = [
+        item for item in dict.fromkeys(explicit_likes + profile_likes + session_likes)
+        if item not in set(applied_dislikes)
+    ]
+    state.constraints["preferences"] = applied_likes
+    state.constraints["avoid"] = applied_dislikes
     if not state.constraints.get("pace"):
         state.constraints["pace"] = state.user_profile.get("pace")
+    if not state.constraints.get("budget_style"):
+        state.constraints["budget_style"] = state.user_profile.get("budget_style")
+    state.memory_resolution = {
+        "applied_likes": applied_likes,
+        "applied_dislikes": applied_dislikes,
+        "suppressed_likes": [
+            {"value": item, "reason": "本轮已禁用"}
+            for item in state.user_profile.get("likes", [])
+            if item in disabled_likes
+        ],
+        "suppressed_dislikes": [
+            {"value": item, "reason": "本轮已禁用"}
+            for item in state.user_profile.get("dislikes", [])
+            if item in disabled_dislikes
+        ],
+        "pace": state.constraints.get("pace"),
+        "budget_style": state.constraints.get("budget_style"),
+    }
     _log(state, "memory_lookup", "读取长期偏好补全当前约束", state.user_profile)
     return state
 
@@ -1001,6 +1035,10 @@ def _build_intent_contract(state: AgentState, llm_constraints: dict[str, Any] | 
     text = state.user_input
     llm_constraints = llm_constraints or {}
     sub_tasks = _infer_sub_tasks(text, state.constraints)
+    if state.is_followup and state.previous_intent_contract and not _is_explicit_task_switch(text):
+        sub_tasks = _dedupe_sub_tasks(
+            list(state.previous_intent_contract.get("sub_tasks") or []) + sub_tasks
+        )
     hard_constraints = {
         key: state.constraints.get(key)
         for key in ["city", "destination", "origin", "date", "date_iso", "time_window", "budget", "pace", "route_scope"]
@@ -3113,8 +3151,6 @@ def _extract_trip_days(text: str) -> int | None:
 
 
 def _infer_task_type(text: str, llm_constraints: dict[str, Any], context: dict[str, Any]) -> str:
-    if context.get("task_type") and any(word in text for word in ["太贵", "换", "改", "控制在", "轻松点", "重排"]):
-        return "replan"
     if any(word in text.lower() for word in ["todo", "to-do"]) or any(word in text for word in ["待办", "拆解", "拆成", "任务列表", "完成标准", "里程碑", "时间块"]):
         return "todo"
     if any(word in text for word in ["取快递", "拿快递", "寄快递", "寄件", "办事", "办理", "跑腿", "顺路", "送到", "送去", "买药", "买菜", "买礼物"]):
@@ -3123,6 +3159,9 @@ def _infer_task_type(text: str, llm_constraints: dict[str, Any], context: dict[s
         return "travel"
     if _has_meal_intent(text):
         return "meal"
+    if context.get("task_type") and any(word in text for word in ["太贵", "换", "改", "控制在", "轻松点", "重排"]):
+        task_type = str(context.get("task_type"))
+        return task_type if task_type in {"travel", "errand", "meal", "todo"} else "unknown"
     llm_type = str(llm_constraints.get("task_type") or "").strip()
     mapping = {
         "travel_plan": "travel",
@@ -3136,6 +3175,12 @@ def _infer_task_type(text: str, llm_constraints: dict[str, Any], context: dict[s
     if llm_type in TASK_TYPES:
         return llm_type
     return "unknown"
+
+
+def _is_explicit_task_switch(text: str) -> bool:
+    switch_words = ["改成", "改为", "变成", "换成"]
+    has_target = _has_todo_intent(text) or _has_errand_intent(text) or _has_meal_intent(text) or _looks_like_travel_request(text)
+    return has_target and any(word in text for word in switch_words)
 
 
 def _has_todo_intent(text: str) -> bool:

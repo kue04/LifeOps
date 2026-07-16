@@ -309,9 +309,14 @@ def _initial_state(
     if trace_id:
         state.trace_id = trace_id
     if previous_result and previous_result.get("constraints"):
+        state.is_followup = True
         state.constraints.update(previous_result["constraints"])
         state.goal = previous_result.get("final_plan", {}).get("goal")
-        state.replan_count = int(previous_result.get("reflection", {}).get("replan_count", 0))
+        state.previous_intent_contract = copy.deepcopy(
+            previous_result.get("intent_contract")
+            or previous_result.get("final_plan", {}).get("intent_contract")
+            or {}
+        )
         state.execution_log.append(
             {
                 "node": "context_restore",

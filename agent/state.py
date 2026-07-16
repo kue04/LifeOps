@@ -9,12 +9,15 @@ from uuid import uuid4
 class AgentState:
     user_input: str
     user_id: str = "default"
+    is_followup: bool = False
+    previous_intent_contract: dict[str, Any] = field(default_factory=dict)
     goal: str | None = None
     constraints: dict[str, Any] = field(default_factory=dict)
     intent_contract: dict[str, Any] = field(default_factory=dict)
     execution_plan: list[dict[str, Any]] = field(default_factory=list)
     artifacts: dict[str, Any] = field(default_factory=dict)
     user_profile: dict[str, Any] = field(default_factory=dict)
+    memory_resolution: dict[str, Any] = field(default_factory=dict)
     plan_steps: list[dict[str, Any]] = field(default_factory=list)
     tool_results: list[dict[str, Any]] = field(default_factory=list)
     candidates: list[dict[str, Any]] = field(default_factory=list)
