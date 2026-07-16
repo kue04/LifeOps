@@ -45,10 +45,18 @@
 ## 验证记录
 
 - 后端 `compileall` 通过。
-- 后端 74 条 unittest 全部通过。
+- 后端 77 条 unittest 全部通过。
 - 9 个确定性离线评估场景全部通过：travel、meal、errand、todo、mixed、replan、clarification、provider fallback。
 - 前端 Multi-Agent 展示版本通过 TypeScript 与 Vite build。
 - 最终提交编号以 Git 历史和交付记录为准。
+
+### 2026-07-17 Provider 修复
+
+- 升级 worktree 同步使用主仓库的忽略文件 `.env`，恢复 DeepSeek 与高德配置。
+- 高德地点搜索改用 `extensions=all`，读取 `biz_ext.cost` 与评分字段。
+- 高德天气在 Python HTTPS 握手失败时增加 curl 传输回退。
+- 免费网页搜索的 Bing RSS 增加 curl 回退，避免 requests 超时后直接返回空结果。
+- 真实端到端验证：DeepSeek Planner、高德天气、Bing 网页来源和高德费用均返回有效数据。
 
 ## 推送说明
 

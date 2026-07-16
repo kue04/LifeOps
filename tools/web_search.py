@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 from html.parser import HTMLParser
 from xml.etree import ElementTree
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 import requests
 
@@ -197,18 +199,24 @@ def _search_duckduckgo(query: str, max_results: int) -> dict:
 
 
 def _search_bing_rss(query: str, max_results: int) -> dict:
-    response = requests.get(
-        "https://www.bing.com/search",
-        params={"q": query, "format": "rss"},
-        headers={
-            "User-Agent": "LifeOpsAgent/0.1 (+https://www.bing.com)",
-            "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
-        },
-        timeout=(2, FREE_SEARCH_TIMEOUT_SECONDS),
-    )
-    response.raise_for_status()
+    url = "https://www.bing.com/search"
+    params = {"q": query, "format": "rss"}
     try:
-        root = ElementTree.fromstring(response.content)
+        response = requests.get(
+            url,
+            params=params,
+            headers={
+                "User-Agent": "LifeOpsAgent/0.1 (+https://www.bing.com)",
+                "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+            },
+            timeout=(2, FREE_SEARCH_TIMEOUT_SECONDS),
+        )
+        response.raise_for_status()
+        content = response.content
+    except requests.RequestException:
+        content = _curl_get(url, params)
+    try:
+        root = ElementTree.fromstring(content)
     except ElementTree.ParseError as exc:
         raise RuntimeError("bing rss response is not valid xml") from exc
     results = []
@@ -236,6 +244,23 @@ def _search_bing_rss(query: str, max_results: int) -> dict:
         "answer": None,
         "results": results,
     }
+
+
+def _curl_get(url: str, params: dict) -> str:
+    curl = shutil.which("curl.exe") or shutil.which("curl")
+    if not curl:
+        raise RuntimeError("requests failed and curl is unavailable")
+    request_url = f"{url}?{urlencode(params)}"
+    completed = subprocess.run(
+        [curl, "-L", "-sS", "--max-time", "15", "-A", "LifeOpsAgent/0.1", request_url],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=16,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr.strip() or "curl request failed")
+    return completed.stdout
 
 
 def _search_wikimedia(query: str, max_results: int) -> dict:

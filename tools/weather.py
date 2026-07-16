@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
+from urllib.parse import urlencode
+
 import requests
 
 from config import settings
@@ -104,18 +109,16 @@ def _get_amap_weather(city: str, date: str | None) -> dict:
     if not settings.amap_api_key:
         raise RuntimeError("AMAP_API_KEY is required when WEATHER_PROVIDER=amap")
     city_code = _amap_city_code(city)
-    response = requests.get(
+    data = _amap_get_json(
         "https://restapi.amap.com/v3/weather/weatherInfo",
-        params={
+        {
             "key": settings.amap_api_key,
             "city": city_code,
             "extensions": "base",
             "output": "JSON",
         },
-        timeout=10,
+        10,
     )
-    response.raise_for_status()
-    data = response.json()
     if data.get("status") != "1":
         raise RuntimeError(data.get("info") or "amap weather failed")
     live = (data.get("lives") or [{}])[0]
@@ -133,22 +136,50 @@ def _get_amap_weather(city: str, date: str | None) -> dict:
 
 
 def _amap_city_code(city: str) -> str:
-    response = requests.get(
+    data = _amap_get_json(
         "https://restapi.amap.com/v3/geocode/geo",
-        params={
+        {
             "key": settings.amap_api_key,
             "address": city,
             "city": city,
             "output": "JSON",
         },
-        timeout=10,
+        10,
     )
-    response.raise_for_status()
-    data = response.json()
     geocodes = data.get("geocodes") or []
     if geocodes:
         return geocodes[0].get("adcode") or city
     return city
+
+
+def _amap_get_json(url: str, params: dict, timeout_seconds: float) -> dict:
+    try:
+        response = requests.get(
+            url,
+            params=params,
+            headers={"User-Agent": "LifeOpsAgent/0.1", "Connection": "close"},
+            timeout=(2, timeout_seconds),
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException:
+        curl = shutil.which("curl.exe") or shutil.which("curl")
+        if not curl:
+            raise
+        request_url = f"{url}?{urlencode(params)}"
+        completed = subprocess.run(
+            [curl, "-sS", "--max-time", str(max(1, int(timeout_seconds))), request_url],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=max(2, int(timeout_seconds) + 1),
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(completed.stderr.strip() or "amap curl request failed")
+        try:
+            return json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("amap curl response is not valid json") from exc
 
 
 def _mock_weather(city: str, date: str | None) -> dict:

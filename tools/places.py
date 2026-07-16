@@ -79,7 +79,7 @@ def _search_amap(city: str, preferences: list[str], hotel_brand: str | None = No
             "keywords": keyword,
             "city": city,
             "citylimit": "true",
-            "extensions": "base",
+            "extensions": "all",
             "offset": 5,
             "page": 1,
         }

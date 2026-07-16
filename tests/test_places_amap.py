@@ -9,6 +9,24 @@ import tools.places as places
 
 
 class AmapPlaceSearchTest(unittest.TestCase):
+    def test_amap_requests_extended_business_fields(self) -> None:
+        original_key = places.settings.amap_api_key
+        object.__setattr__(places.settings, "amap_api_key", "test-key")
+        captured: list[dict] = []
+
+        def fake_get_json(params: dict, timeout_seconds: float) -> dict:
+            captured.append(params)
+            return {"status": "1", "pois": []}
+
+        try:
+            with patch("tools.places._amap_get_json", side_effect=fake_get_json):
+                places._search_amap("杭州", ["美食"])
+        finally:
+            object.__setattr__(places.settings, "amap_api_key", original_key)
+
+        self.assertTrue(captured)
+        self.assertTrue(all(params["extensions"] == "all" for params in captured))
+
     def test_amap_returns_partial_places_when_later_keyword_times_out(self) -> None:
         original_key = places.settings.amap_api_key
         object.__setattr__(places.settings, "amap_api_key", "test-key")
