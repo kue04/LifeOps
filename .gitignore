@@ -9,5 +9,7 @@ venv/
 *.db
 streamlit.log
 streamlit.err.log
+data/dev-*.log
+data/frontend-smoke-*.png
 dist/
 node_modules/

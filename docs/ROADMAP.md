@@ -9,38 +9,36 @@ The project is strongest at travel and local outing planning:
 - scoring
 - risk checking
 - reflection and replan
-- React frontend with run streaming, history, profile, and feedback
+- confirmation-gated calendar export
+- React frontend with planning, history, profile, audit, and feedback
 
 ## Engineering First
 
 Current priority:
 
-- local startup scripts
-- Docker and compose
-- CI
-- environment documentation
-- stable SQLite path configuration
-- API documentation
+- release checklist
+- Docker and compose verification
+- CI checks
+- production environment documentation
+- provider health and timeout hardening
+- evaluation samples and Bad Case workflow
 
-## Next: LangGraph Native Flow
+## Done: LangGraph MVP Flow
 
-Move from the hand-written node sequence in `agent/graph.py` to a real `StateGraph` while preserving `run_lifeops(...)` output compatibility.
+The backend now uses a LangGraph-backed flow while preserving `run_lifeops(...)` output compatibility.
 
-Required nodes:
+Core nodes:
 
 - extract constraints
 - date resolver
 - memory
 - clarification check
 - planner
-- tool router
-- candidate scorer
-- plan generator
+- dynamic tool execution
+- plan synthesis
 - risk checker
 - reflection
 - final response
-
-The replan path should loop through tool routing, scoring, plan generation, risk checking, and reflection at most once by default.
 
 ## Later: Full LifeOps Scope
 
@@ -49,7 +47,7 @@ Expand after engineering and LangGraph are stable:
 1. Errand routing
 2. Todo decomposition
 3. Meal planning
-4. Calendar export and reminders
+4. Reminders
 5. Multi-turn task status tracking
 6. Weekly and monthly planning
 

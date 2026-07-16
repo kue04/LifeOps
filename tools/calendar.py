@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +44,7 @@ def save_ics(final_plan: dict, output_dir: str | Path = "exports") -> Path:
 
 
 def _stamp() -> str:
-    return datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _plan_date(final_plan: dict[str, Any]) -> str:

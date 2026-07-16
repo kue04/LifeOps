@@ -8,15 +8,26 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from agent.graph import run_lifeops
 from config import settings
+from services.app_context import AppContext, get_app_context
 from services.trace_logger import load_trace
-from storage.db import get_profile, get_task_history, list_task_history, save_plan_feedback
+from storage.db import (
+    get_profile,
+    get_task_history,
+    list_app_audit_logs,
+    list_task_history,
+    has_app_confirmation,
+    record_app_audit,
+    record_app_confirmation,
+    save_app_run_context,
+    save_plan_feedback,
+)
 from tools.calendar import build_ics
 
 
@@ -83,6 +94,7 @@ class FeedbackRequest(BaseModel):
 
 class CalendarExportRequest(BaseModel):
     final_plan: dict[str, Any]
+    confirmation_id: str | None = None
 
 
 class ConfirmActionRequest(BaseModel):
@@ -101,8 +113,8 @@ RUNS_LOCK = threading.Lock()
 def root() -> dict[str, Any]:
     return {
         "status": "ok",
-        "message": "LifeOps API is running. Open the frontend at http://localhost:5173 or call POST /runs/plan.",
-        "endpoints": ["/health", "/plan", "/runs/plan", "/history", "/profile", "/feedback"],
+        "message": "LifeOps API is running. Open the frontend at http://localhost:5173 or call POST /app/runs/plan.",
+        "endpoints": ["/health", "/app/plan", "/app/runs/plan", "/app/me", "/app/history", "/app/profile", "/app/feedback"],
     }
 
 
@@ -156,26 +168,72 @@ def provider_health() -> dict[str, Any]:
     return {"status": "ok", "providers": providers}
 
 
+@app.get("/app/me")
+@app.get("/api/app/me")
+def app_me(context: AppContext = Depends(get_app_context)) -> dict[str, Any]:
+    return {
+        "user_id": context.user_id,
+        "role": context.role,
+        "user_name": context.user_name,
+    }
+
+
+@app.get("/app/audit")
+@app.get("/api/app/audit")
+def app_audit(limit: int = 50, context: AppContext = Depends(get_app_context)) -> dict[str, Any]:
+    if not context.can_view_audit:
+        raise HTTPException(status_code=403, detail="仅运营管理员可以查看审计日志。")
+    return {"items": list_app_audit_logs(limit)}
+
+
 @app.post("/plan")
 @app.post("/api/plan")
-def plan(request: PlanRequest) -> dict:
-    return _frontend_response(run_lifeops(request.user_input, request_context=_request_context(request)))
+@app.post("/app/plan")
+@app.post("/api/app/plan")
+def plan(request: PlanRequest, context: AppContext = Depends(get_app_context)) -> dict:
+    result = _frontend_response(
+        run_lifeops(request.user_input, request_context=_request_context(request), user_id=context.user_id)
+    )
+    _record_plan_completion(result, context, "plan_generated")
+    return result
 
 
 @app.post("/replan")
 @app.post("/api/replan")
-def replan(request: ReplanRequest) -> dict:
-    return _frontend_response(run_lifeops(request.user_input, previous_result=request.previous_result, request_context=_request_context(request)))
+@app.post("/app/replan")
+@app.post("/api/app/replan")
+def replan(request: ReplanRequest, context: AppContext = Depends(get_app_context)) -> dict:
+    result = _frontend_response(
+        run_lifeops(
+            request.user_input,
+            previous_result=request.previous_result,
+            request_context=_request_context(request),
+            user_id=context.user_id,
+        )
+    )
+    _record_plan_completion(result, context, "plan_replanned")
+    return result
 
 
 @app.post("/runs/plan")
 @app.post("/api/runs/plan")
-def start_plan_run(request: RunRequest) -> dict[str, str]:
+@app.post("/app/runs/plan")
+@app.post("/api/app/runs/plan")
+def start_plan_run(request: RunRequest, context: AppContext = Depends(get_app_context)) -> dict[str, str]:
     trace_id = uuid4().hex[:12]
     _create_run(trace_id, request.user_input)
+    save_app_run_context(trace_id, context.user_id, context.role, status="running")
+    record_app_audit(
+        context.user_id,
+        context.role,
+        "plan_start",
+        "run",
+        trace_id,
+        details={"scenario": "travel_planning"},
+    )
     thread = threading.Thread(
         target=_run_plan_worker,
-        args=(trace_id, request.user_input, request.previous_result, _request_context(request)),
+        args=(trace_id, request.user_input, request.previous_result, _request_context(request), context),
         daemon=True,
     )
     thread.start()
@@ -184,6 +242,8 @@ def start_plan_run(request: RunRequest) -> dict[str, str]:
 
 @app.get("/runs/{trace_id}")
 @app.get("/api/runs/{trace_id}")
+@app.get("/app/runs/{trace_id}")
+@app.get("/api/app/runs/{trace_id}")
 def run_status(trace_id: str) -> dict[str, Any]:
     with RUNS_LOCK:
         run = RUNS.get(trace_id)
@@ -200,6 +260,8 @@ def run_status(trace_id: str) -> dict[str, Any]:
 
 @app.get("/runs/{trace_id}/events")
 @app.get("/api/runs/{trace_id}/events")
+@app.get("/app/runs/{trace_id}/events")
+@app.get("/api/app/runs/{trace_id}/events")
 def run_events(trace_id: str) -> StreamingResponse:
     return StreamingResponse(_event_stream(trace_id), media_type="text/event-stream")
 
@@ -212,26 +274,43 @@ def trace(trace_id: str) -> dict:
 
 @app.get("/profile")
 @app.get("/api/profile")
-def profile() -> dict[str, Any]:
-    return get_profile()
+@app.get("/app/profile")
+@app.get("/api/app/profile")
+def profile(context: AppContext = Depends(get_app_context)) -> dict[str, Any]:
+    return get_profile(context.user_id)
 
 
 @app.post("/feedback")
 @app.post("/api/feedback")
-def feedback(request: FeedbackRequest) -> dict[str, Any]:
-    return save_plan_feedback(request.model_dump())
+@app.post("/app/feedback")
+@app.post("/api/app/feedback")
+def feedback(request: FeedbackRequest, context: AppContext = Depends(get_app_context)) -> dict[str, Any]:
+    result = save_plan_feedback(request.model_dump(), user_id=context.user_id)
+    record_app_audit(
+        context.user_id,
+        context.role,
+        "feedback_submitted",
+        "feedback",
+        result.get("feedback_id"),
+        details={"task_id": request.task_id, "trace_id": request.trace_id, "rating": request.rating},
+    )
+    return result
 
 
 @app.get("/history")
 @app.get("/api/history")
-def history(limit: int = 20) -> dict:
-    return {"items": list_task_history(limit)}
+@app.get("/app/history")
+@app.get("/api/app/history")
+def history(limit: int = 20, context: AppContext = Depends(get_app_context)) -> dict:
+    return {"items": list_task_history(limit, user_id=context.user_id, role=context.role)}
 
 
 @app.get("/history/{task_id}")
 @app.get("/api/history/{task_id}")
-def history_detail(task_id: str) -> dict[str, Any]:
-    item = get_task_history(task_id)
+@app.get("/app/history/{task_id}")
+@app.get("/api/app/history/{task_id}")
+def history_detail(task_id: str, context: AppContext = Depends(get_app_context)) -> dict[str, Any]:
+    item = get_task_history(task_id, user_id=context.user_id, role=context.role)
     if not item:
         return {"found": False, "item": None, "result": None}
     final_plan = _parse_json_dict(item.get("final_plan"))
@@ -251,24 +330,69 @@ def history_detail(task_id: str) -> dict[str, Any]:
 
 @app.post("/calendar/ics")
 @app.post("/api/calendar/ics")
-def calendar_ics(request: CalendarExportRequest) -> Response:
+@app.post("/app/calendar/ics")
+@app.post("/api/app/calendar/ics")
+def calendar_ics(request: CalendarExportRequest, context: AppContext = Depends(get_app_context)) -> Response:
+    _require_calendar_confirmation(context, request.confirmation_id)
+    record_app_audit(
+        context.user_id,
+        context.role,
+        "calendar_exported",
+        "calendar",
+        None,
+        details={"confirmation_id": request.confirmation_id},
+    )
     return _ics_response(request.final_plan)
 
 
 @app.get("/history/{task_id}/ics")
 @app.get("/api/history/{task_id}/ics")
-def history_calendar_ics(task_id: str) -> Response:
-    item = get_task_history(task_id)
+@app.get("/app/history/{task_id}/ics")
+@app.get("/api/app/history/{task_id}/ics")
+def history_calendar_ics(
+    task_id: str,
+    confirmation_id: str | None = None,
+    context: AppContext = Depends(get_app_context),
+) -> Response:
+    _require_calendar_confirmation(context, confirmation_id)
+    item = get_task_history(task_id, user_id=context.user_id, role=context.role)
     if not item:
         return Response("Plan not found", status_code=404)
+    record_app_audit(
+        context.user_id,
+        context.role,
+        "calendar_exported",
+        "task_history",
+        task_id,
+        details={"confirmation_id": confirmation_id},
+    )
     return _ics_response(_parse_json_dict(item.get("final_plan")))
 
 
 @app.post("/confirm-action")
 @app.post("/api/confirm-action")
-def confirm_action(request: ConfirmActionRequest) -> dict[str, Any]:
+@app.post("/app/confirm-action")
+@app.post("/api/app/confirm-action")
+def confirm_action(request: ConfirmActionRequest, context: AppContext = Depends(get_app_context)) -> dict[str, Any]:
+    confirmation = record_app_confirmation(
+        context.user_id,
+        request.action_type,
+        "confirmed",
+        trace_id=request.trace_id,
+        task_id=request.plan_id,
+        details={"label": request.label, "items": request.items},
+    )
+    record_app_audit(
+        context.user_id,
+        context.role,
+        "action_confirmed",
+        "confirmation",
+        confirmation["confirmation_id"],
+        details={"action_type": request.action_type, "trace_id": request.trace_id, "plan_id": request.plan_id},
+    )
     return {
         "status": "confirmed",
+        "confirmation_id": confirmation["confirmation_id"],
         "execution": "not_performed",
         "requires_user_confirmation": False,
         "action_type": request.action_type,
@@ -296,7 +420,9 @@ def _run_plan_worker(
     user_input: str,
     previous_result: dict[str, Any] | None,
     request_context: dict[str, Any] | None = None,
+    app_context: AppContext | None = None,
 ) -> None:
+    user_id = app_context.user_id if app_context else "default"
     try:
         result = run_lifeops(
             user_input,
@@ -304,8 +430,11 @@ def _run_plan_worker(
             trace_id=trace_id,
             progress_callback=lambda event: _append_run_event(trace_id, event),
             request_context=request_context,
+            user_id=user_id,
         )
         normalized = _frontend_response(result)
+        if app_context:
+            _record_plan_completion(normalized, app_context, "plan_generated")
         with RUNS_LOCK:
             run = RUNS[trace_id]
             run["status"] = "done"
@@ -393,6 +522,12 @@ def _ics_filename(final_plan: dict[str, Any]) -> str:
     return f"lifeops_plan{suffix}.ics"
 
 
+def _require_calendar_confirmation(context: AppContext, confirmation_id: str | None) -> None:
+    if has_app_confirmation(context.user_id, confirmation_id, "export_calendar"):
+        return
+    raise HTTPException(status_code=403, detail="导出日历前需要先确认 export_calendar 动作。")
+
+
 def _provider_status(name: str, provider: str, configured: bool, message: str) -> dict[str, Any]:
     if configured:
         status = "degraded" if provider in {"mock", "estimated"} else "ok"
@@ -419,6 +554,40 @@ def _request_context(request: PlanRequest | ReplanRequest | RunRequest) -> dict[
     }
 
 
+def _record_plan_completion(result: dict[str, Any], context: AppContext, action: str) -> None:
+    trace_id = result.get("trace_id")
+    if trace_id:
+        save_app_run_context(
+            trace_id,
+            context.user_id,
+            context.role,
+            task_id=result.get("task_id"),
+            status=str(result.get("status") or "unknown"),
+            scenario=_app_scenario(result),
+        )
+    record_app_audit(
+        context.user_id,
+        context.role,
+        action,
+        "run",
+        trace_id,
+        details={
+            "status": result.get("status"),
+            "task_id": result.get("task_id"),
+            "scenario": _app_scenario(result),
+        },
+    )
+
+
+def _app_scenario(result: dict[str, Any]) -> str:
+    constraints = result.get("constraints") or {}
+    plan = result.get("final_plan") or {}
+    task_type = constraints.get("task_type") or plan.get("task_type")
+    if task_type in {"travel", "mixed"}:
+        return "travel"
+    return str(task_type or "plan")
+
+
 def _frontend_response(result: dict[str, Any]) -> dict[str, Any]:
     final_plan = _normalize_final_plan(result.get("final_plan"), result)
     normalized = dict(result)
@@ -430,9 +599,134 @@ def _frontend_response(result: dict[str, Any]) -> dict[str, Any]:
     normalized["quality_score"] = _quality_score(final_plan, normalized["quality_warnings"], result)
     normalized["execution_log"] = _normalize_execution_log(result.get("execution_log"))
     normalized["tool_results"] = result.get("tool_results") or []
+    normalized["confirmations"] = _normalize_confirmations(final_plan)
+    normalized["task_summary"] = _task_summary(final_plan, normalized)
+    normalized["plan"] = _standard_plan_items(final_plan)
+    normalized["budget_summary"] = _standard_budget_summary(final_plan)
+    normalized["tool_sources"] = _standard_tool_sources(final_plan, normalized["tool_results"])
+    normalized["risks"] = _standard_risks(final_plan.get("risks") or result.get("risks") or [])
     if result.get("status") == "need_clarification":
         normalized["question"] = result.get("question")
     return normalized
+
+
+def _task_summary(final_plan: dict[str, Any], result: dict[str, Any]) -> str:
+    return str(
+        final_plan.get("goal")
+        or final_plan.get("summary")
+        or final_plan.get("title")
+        or result.get("assistant_message")
+        or ""
+    )
+
+
+def _standard_plan_items(final_plan: dict[str, Any]) -> list[dict[str, Any]]:
+    items = []
+    for item in final_plan.get("itinerary") or []:
+        if not isinstance(item, dict):
+            continue
+        cost = item.get("cost") if item.get("cost_known") else None
+        items.append({
+            "time": item.get("time") or "",
+            "action": item.get("place") or item.get("reason") or "待安排",
+            "location": item.get("address") or item.get("area") or item.get("place") or "",
+            "cost_estimate": cost,
+            "evidence": list(item.get("evidence") or []),
+        })
+    return items
+
+
+def _standard_budget_summary(final_plan: dict[str, Any]) -> str:
+    budget = final_plan.get("budget") or {}
+    total = budget.get("total")
+    limit = budget.get("budget_limit")
+    if total is None and limit is None:
+        return "预算暂未确认。"
+    if limit:
+        status = "未超出预算" if _number_like(total) <= _number_like(limit) else "超过预算"
+        return f"预计总计 {total or 0} 元，预算上限 {limit} 元，{status}。"
+    return f"预计总计 {total or 0} 元。"
+
+
+def _standard_tool_sources(final_plan: dict[str, Any], tool_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    for index, source in enumerate((final_plan.get("travel_research") or {}).get("sources") or [], start=1):
+        sources.append({
+            "tool_name": "web_search_tool",
+            "source_id": f"web_{index}",
+            "title": source.get("title") or source.get("url") or "网页来源",
+            "url": source.get("url"),
+            "snippet": source.get("content") or "",
+        })
+    for index, tool in enumerate(tool_results, start=1):
+        if not isinstance(tool, dict):
+            continue
+        tool_name = str(tool.get("tool_name") or "tool")
+        if tool_name == "web_search_tool":
+            continue
+        data = tool.get("data")
+        snippet = json.dumps(_compact_source_payload(data), ensure_ascii=False, default=str)
+        sources.append({
+            "tool_name": tool_name,
+            "source_id": f"tool_{index}",
+            "title": tool_name,
+            "url": None,
+            "snippet": snippet[:220],
+        })
+    return sources
+
+
+def _standard_risks(risks: Any) -> list[dict[str, str]]:
+    result = []
+    source = risks if isinstance(risks, list) else [risks]
+    for item in source:
+        if isinstance(item, dict):
+            result.append({
+                "level": str(item.get("level") or "medium"),
+                "description": str(item.get("description") or item.get("title") or item),
+                "mitigation": str(item.get("mitigation") or "请在执行前再次确认。"),
+            })
+            continue
+        text = str(item or "").strip()
+        if not text:
+            continue
+        level = "high" if any(word in text for word in ["超过", "失败", "无法", "危险"]) else "medium"
+        result.append({"level": level, "description": text, "mitigation": "请在执行前再次确认。"})
+    return result
+
+
+def _compact_source_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _compact_source_payload(item) for key, item in list(value.items())[:8] if key not in {"raw", "geometry", "polyline"}}
+    if isinstance(value, list):
+        return [_compact_source_payload(item) for item in value[:4]]
+    return value
+
+
+def _normalize_confirmations(final_plan: dict[str, Any]) -> list[dict[str, Any]]:
+    confirmations = []
+    for item in final_plan.get("confirm_actions") or []:
+        if not isinstance(item, dict):
+            continue
+        confirmations.append({
+            "action": item.get("action_type") or item.get("action") or "confirm_action",
+            "description": item.get("label") or item.get("description") or "需要用户确认",
+            "required": True,
+        })
+    if final_plan.get("itinerary"):
+        confirmations.append({
+            "action": "export_calendar",
+            "description": "导出 ICS 日历文件",
+            "required": True,
+        })
+    deduped = []
+    seen = set()
+    for item in confirmations:
+        key = (item["action"], item["description"])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(item)
+    return deduped
 
 
 def _sync_frontend_overview(final_plan: dict[str, Any], assistant_message: str) -> None:

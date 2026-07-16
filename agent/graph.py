@@ -60,15 +60,16 @@ def run_lifeops(
     trace_id: str | None = None,
     progress_callback: ProgressCallback | None = None,
     request_context: dict[str, Any] | None = None,
+    user_id: str = "default",
 ) -> dict:
-    state = _initial_state(user_input, previous_result, trace_id, request_context)
+    state = _initial_state(user_input, previous_result, trace_id, request_context, user_id)
     state._progress_callback = progress_callback  # type: ignore[attr-defined]
     _emit(progress_callback, state.trace_id, "run", "run", "开始执行规划任务", "running", {}, 0)
     _emit(progress_callback, state.trace_id, "run", "run", "任务已创建，开始执行节点", "done", {}, 1)
     state = _run_langgraph(state, NODES, progress_callback)
     result = final_response(state)
     if result.get("status") == "success":
-        result["task_id"] = save_task_history(user_input, result.get("final_plan"))
+        result["task_id"] = save_task_history(user_input, result.get("final_plan"), user_id=user_id)
     result["trace"] = load_trace(state.trace_id)
     _emit(
         progress_callback,
@@ -302,8 +303,9 @@ def _initial_state(
     previous_result: dict | None,
     trace_id: str | None = None,
     request_context: dict[str, Any] | None = None,
+    user_id: str = "default",
 ) -> AgentState:
-    state = AgentState(user_input=user_input)
+    state = AgentState(user_input=user_input, user_id=user_id)
     if trace_id:
         state.trace_id = trace_id
     if previous_result and previous_result.get("constraints"):

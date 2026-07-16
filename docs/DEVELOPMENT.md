@@ -6,6 +6,10 @@ Backend:
 
 ```powershell
 cd D:\llm\LifeOps
+$env:LIFEOPS_LLM_MODE="mock"
+$env:WEATHER_PROVIDER="mock"
+$env:PLACE_PROVIDER="mock"
+$env:SEARCH_PROVIDER="mock"
 python -m uvicorn api:app --reload
 ```
 
@@ -13,6 +17,7 @@ Frontend:
 
 ```powershell
 cd D:\llm\lifeops-front
+$env:VITE_LIFEOPS_API_BASE="http://localhost:8000"
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
@@ -27,6 +32,21 @@ Open:
 
 - API: http://localhost:8000
 - Frontend: http://localhost:5173
+
+If these ports are already occupied, use a paired alternate port:
+
+```powershell
+cd D:\llm\LifeOps
+$env:LIFEOPS_LLM_MODE="mock"
+$env:WEATHER_PROVIDER="mock"
+$env:PLACE_PROVIDER="mock"
+$env:SEARCH_PROVIDER="mock"
+python -m uvicorn api:app --host 127.0.0.1 --port 8010
+
+cd D:\llm\lifeops-front
+$env:VITE_LIFEOPS_API_BASE="http://127.0.0.1:8010"
+npm run dev -- --host 127.0.0.1 --port 5174
+```
 
 ## Docker Startup
 
@@ -63,8 +83,11 @@ VITE_LIFEOPS_API_BASE=http://localhost:8000
 Backend:
 
 ```powershell
-python -m py_compile api.py agent\graph.py agent\langgraph_app.py agent\nodes.py storage\db.py
-python -m unittest tests.test_api_imports tests.test_geocoder_weather
+$env:LIFEOPS_LLM_MODE="mock"
+$env:WEATHER_PROVIDER="mock"
+$env:PLACE_PROVIDER="mock"
+$env:SEARCH_PROVIDER="mock"
+python -m unittest discover -s tests
 ```
 
 Frontend:
@@ -78,3 +101,4 @@ npm run build
 - `app.py` is still the Streamlit debug console.
 - The production-like UI is the React app in `D:\llm\lifeops-front`.
 - External search and map providers can be slow or unavailable; use `mock` providers for fast demos.
+- Main API contracts live under `/app/*`; legacy routes are compatibility aliases.

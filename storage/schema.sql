@@ -49,3 +49,36 @@ CREATE TABLE IF NOT EXISTS agent_trace (
   status TEXT,
   created_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS app_run_context (
+  trace_id TEXT PRIMARY KEY,
+  task_id TEXT,
+  user_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  status TEXT,
+  scenario TEXT,
+  created_at TEXT,
+  updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS app_confirmations (
+  confirmation_id TEXT PRIMARY KEY,
+  trace_id TEXT,
+  task_id TEXT,
+  user_id TEXT NOT NULL,
+  action_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  details TEXT,
+  created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS app_audit_log (
+  audit_id TEXT PRIMARY KEY,
+  actor_user_id TEXT NOT NULL,
+  actor_role TEXT NOT NULL,
+  action TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id TEXT,
+  details TEXT,
+  created_at TEXT
+);

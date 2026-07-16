@@ -2,7 +2,7 @@
 
 LifeOps Agent 是一个面向真实生活任务的 AI Agent 规划系统。它把用户的一句话需求拆解成可执行计划，并通过工具调用、候选评分、风险检查和执行记录，让大模型从“聊天回答”变成“可追踪的生活任务规划器”。
 
-项目已完成后端 Agent、API 服务、Streamlit 调试界面、SQLite 记录、工具链封装、自动化测试和 Docker 化配置，可作为大模型应用工程/Agent 系统方向的面试展示项目。
+项目已完成后端 Agent、FastAPI 服务、React 前端、SQLite 记录、工具链封装、自动化测试和 Docker 化配置，可作为大模型应用工程/Agent 系统方向的面试展示项目。
 
 ## 系统功能
 
@@ -11,8 +11,9 @@ LifeOps Agent 是一个面向真实生活任务的 AI Agent 规划系统。它�
 - Agent 工作流编排：通过约束抽取、澄清判断、计划生成、候选评分、风险检查、反思修正形成闭环。
 - 可追踪执行记录：每次运行保存 trace、状态、工具结果和最终计划，便于复盘和调试。
 - 用户画像与反馈：保存偏好、避雷项和计划反馈，让系统具备持续优化的基础。
-- API 服务：提供计划生成、运行状态、历史记录、用户画像、反馈和日历导出能力。
-- 本地调试界面：提供 Streamlit 页面，方便快速验证 Agent 输出。
+- API 服务：提供 `/app/*` 计划生成、运行状态、历史记录、用户画像、反馈、审计和确认后日历导出能力。
+- React 前端：提供规划工作台、结果页、历史、画像、审计和展示页。
+- 本地调试界面：保留 Streamlit 页面，方便快速验证 Agent 输出。
 - 工程化交付：包含测试、Dockerfile、docker-compose、CI 配置和环境变量模板。
 
 ## Agent 流程
@@ -58,7 +59,7 @@ user input
 - Pydantic
 - SQLite
 - Streamlit
-- LangGraph 风格 Agent workflow
+- LangGraph Agent workflow
 - OpenAI-compatible LLM client
 - OpenMeteo / OpenStreetMap / Web Search 工具封装
 - unittest
@@ -95,10 +96,13 @@ pip install -r requirements.txt
 uvicorn api:app --reload
 ```
 
-启动 Streamlit 调试界面：
+启动 React 前端：
 
 ```powershell
-streamlit run app.py
+cd D:\llm\lifeops-front
+npm install
+$env:VITE_LIFEOPS_API_BASE="http://localhost:8000"
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 运行测试：
@@ -136,6 +140,6 @@ SEARCH_COUNT=8
 
 ## 前端展示
 
-配套前端仓库：[kue04/lifeops-front](https://github.com/kue04/lifeops-front)
+配套前端仓库：`D:\llm\lifeops-front`
 
-前端提供计划输入、执行状态、计划详情、历史记录、用户画像和项目展示页。面试展示时可以先从前端介绍产品体验，再切回本仓库说明 Agent 工作流和后端工程实现。
+前端提供计划输入、执行状态、计划详情、历史记录、用户画像、审计和项目展示页。面试展示时可以先从前端介绍产品体验，再切回本仓库说明 Agent 工作流和后端工程实现。

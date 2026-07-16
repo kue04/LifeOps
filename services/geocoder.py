@@ -56,7 +56,7 @@ def _geocode_with_nominatim(city: str) -> dict:
                 "accept-language": "zh-CN",
             },
             headers={"User-Agent": "LifeOpsAgent/0.1"},
-            timeout=15,
+            timeout=3,
         )
         response.raise_for_status()
         results = response.json()

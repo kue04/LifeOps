@@ -57,11 +57,163 @@ def save_task_history(user_input: str, final_plan: dict[str, Any] | None, user_i
     return task_id
 
 
-def list_task_history(limit: int = 20) -> list[dict[str, Any]]:
+def save_app_run_context(
+    trace_id: str,
+    user_id: str,
+    role: str,
+    task_id: str | None = None,
+    status: str = "running",
+    scenario: str | None = None,
+) -> None:
     init_db()
+    now = datetime.now().isoformat(timespec="seconds")
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_run_context (
+              trace_id, task_id, user_id, role, status, scenario, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(trace_id) DO UPDATE SET
+              task_id = COALESCE(excluded.task_id, app_run_context.task_id),
+              user_id = excluded.user_id,
+              role = excluded.role,
+              status = excluded.status,
+              scenario = COALESCE(excluded.scenario, app_run_context.scenario),
+              updated_at = excluded.updated_at
+            """,
+            (trace_id, task_id, user_id, role, status, scenario, now, now),
+        )
+
+
+def record_app_confirmation(
+    user_id: str,
+    action_type: str,
+    status: str,
+    trace_id: str | None = None,
+    task_id: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    init_db()
+    confirmation_id = uuid4().hex[:12]
+    created_at = datetime.now().isoformat(timespec="seconds")
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_confirmations (
+              confirmation_id, trace_id, task_id, user_id, action_type, status, details, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                confirmation_id,
+                trace_id,
+                task_id,
+                user_id,
+                action_type,
+                status,
+                json.dumps(details or {}, ensure_ascii=False),
+                created_at,
+            ),
+        )
+    return {"confirmation_id": confirmation_id, "status": status, "created_at": created_at}
+
+
+def has_app_confirmation(user_id: str, confirmation_id: str | None, action_type: str) -> bool:
+    if not confirmation_id:
+        return False
+    init_db()
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT confirmation_id
+            FROM app_confirmations
+            WHERE confirmation_id = ?
+              AND user_id = ?
+              AND action_type = ?
+              AND status = 'confirmed'
+            """,
+            (confirmation_id, user_id, action_type),
+        ).fetchone()
+    return row is not None
+
+
+def record_app_audit(
+    actor_user_id: str,
+    actor_role: str,
+    action: str,
+    resource_type: str,
+    resource_id: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    init_db()
+    audit_id = uuid4().hex[:12]
+    created_at = datetime.now().isoformat(timespec="seconds")
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_audit_log (
+              audit_id, actor_user_id, actor_role, action,
+              resource_type, resource_id, details, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                audit_id,
+                actor_user_id,
+                actor_role,
+                action,
+                resource_type,
+                resource_id,
+                json.dumps(details or {}, ensure_ascii=False),
+                created_at,
+            ),
+        )
+    return {"audit_id": audit_id, "created_at": created_at}
+
+
+def list_app_audit_logs(limit: int = 50) -> list[dict[str, Any]]:
+    init_db()
+    safe_limit = max(1, min(int(limit), 200))
     with connect() as conn:
         rows = conn.execute(
             """
+            SELECT
+              audit_id,
+              actor_user_id,
+              actor_role,
+              action,
+              resource_type,
+              resource_id,
+              details,
+              created_at
+            FROM app_audit_log
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_task_history(
+    limit: int = 20,
+    user_id: str | None = None,
+    role: str = "user",
+) -> list[dict[str, Any]]:
+    init_db()
+    where = ""
+    params: list[Any] = []
+    if user_id:
+        if role in {"operator_admin", "admin"}:
+            where = ""
+        else:
+            where = "WHERE task_history.user_id = ?"
+            params.append(user_id)
+    params.append(limit)
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
             SELECT
               task_history.task_id,
               task_history.user_id,
@@ -69,15 +221,19 @@ def list_task_history(limit: int = 20) -> list[dict[str, Any]]:
               task_history.final_plan,
               task_history.feedback,
               task_history.created_at,
+              app_run_context.status AS app_status,
               CASE WHEN plan_feedback.feedback_id IS NULL THEN 0 ELSE 1 END AS has_feedback
             FROM task_history
             LEFT JOIN plan_feedback
               ON plan_feedback.task_id = task_history.task_id
+            LEFT JOIN app_run_context
+              ON app_run_context.task_id = task_history.task_id
+            {where}
             GROUP BY task_history.task_id
             ORDER BY task_history.created_at DESC
             LIMIT ?
             """,
-            (limit,),
+            params,
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -376,11 +532,23 @@ def _safe_int(value: Any) -> int | None:
         return None
 
 
-def get_task_history(task_id: str) -> dict[str, Any] | None:
+def get_task_history(
+    task_id: str,
+    user_id: str | None = None,
+    role: str = "user",
+) -> dict[str, Any] | None:
     init_db()
+    where = "WHERE task_history.task_id = ?"
+    params: list[Any] = [task_id]
+    if user_id:
+        if role in {"operator_admin", "admin"}:
+            pass
+        else:
+            where += " AND task_history.user_id = ?"
+            params.append(user_id)
     with connect() as conn:
         row = conn.execute(
-            """
+            f"""
             SELECT
               task_history.task_id,
               task_history.user_id,
@@ -388,13 +556,16 @@ def get_task_history(task_id: str) -> dict[str, Any] | None:
               task_history.final_plan,
               task_history.feedback,
               task_history.created_at,
+              app_run_context.status AS app_status,
               CASE WHEN plan_feedback.feedback_id IS NULL THEN 0 ELSE 1 END AS has_feedback
             FROM task_history
             LEFT JOIN plan_feedback
               ON plan_feedback.task_id = task_history.task_id
-            WHERE task_history.task_id = ?
+            LEFT JOIN app_run_context
+              ON app_run_context.task_id = task_history.task_id
+            {where}
             GROUP BY task_history.task_id
             """,
-            (task_id,),
+            params,
         ).fetchone()
     return dict(row) if row else None

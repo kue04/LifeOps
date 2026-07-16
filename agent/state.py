@@ -8,6 +8,7 @@ from uuid import uuid4
 @dataclass
 class AgentState:
     user_input: str
+    user_id: str = "default"
     goal: str | None = None
     constraints: dict[str, Any] = field(default_factory=dict)
     intent_contract: dict[str, Any] = field(default_factory=dict)

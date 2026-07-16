@@ -338,8 +338,8 @@ class PlaceRolePlanningTest(unittest.TestCase):
         self.assertIn("宁波", joined_query)
         self.assertNotIn("杭州", joined_query)
 
-    def test_auto_replan_restarts_from_tool_router(self) -> None:
-        self.assertEqual(_replan_nodes()[0][0], "travel_tool_router")
+    def test_auto_replan_restarts_from_dynamic_planner(self) -> None:
+        self.assertEqual(_replan_nodes()[0][0], "planner")
 
 
 if __name__ == "__main__":

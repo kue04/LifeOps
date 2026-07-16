@@ -287,7 +287,7 @@ def normalize_dates(state: AgentState) -> AgentState:
 
 
 def load_memory(state: AgentState) -> AgentState:
-    state.user_profile = load_user_profile()
+    state.user_profile = load_user_profile(state.user_id)
     avoid = set(state.constraints.get("avoid", []))
     if (state.constraints.get("task_type") in {None, "travel", "unknown"}
         and not state.constraints.get("preferences")
@@ -488,7 +488,7 @@ def travel_tool_router(state: AgentState) -> AgentState:
             "results": [],
             "note": "地点搜索未返回真实候选，跳过网页补证据并等待用户补充区域/偏好",
         }
-        search = _tool_result("web_search_tool", search_data)
+        search = _tool_result("web_search_tool", search_data, input_data={"query": None})
         places: list[dict[str, Any]] = []
         travel_places: list[dict[str, Any]] = []
         lifestyle_places = {"foods": [], "hotels": []}
@@ -524,7 +524,7 @@ def travel_tool_router(state: AgentState) -> AgentState:
         input_data={"query": search_query, "max_results": 3},
         progress=60,
     )
-    search = _tool_result("web_search_tool", _search_web_for_travel(state, search_query, max_results=10))
+    search = _tool_result("web_search_tool", _search_web_for_travel(state, search_query, max_results=10), input_data={"query": search_query, "max_results": 10})
     _emit_tool_event(
         state,
         "tool_router",
@@ -1323,7 +1323,13 @@ def _dynamic_search(state: AgentState) -> None:
     state._travel_research = research  # type: ignore[attr-defined]
     state._places = places  # type: ignore[attr-defined]
     state._lifestyle_places = lifestyle_places  # type: ignore[attr-defined]
-    state.tool_results.append(_tool_result("web_search_tool", search))
+    state.tool_results.append(_tool_result("web_search_tool", search, input_data={"query": query, "max_results": 10}))
+    _log(state, "tool_router", "完成网页信息查询", {
+        "search_query": query,
+        "search_provider": search.get("provider"),
+        "search_results_count": len(search.get("results") or []),
+        "research_sources": len(research.get("sources") or []),
+    })
     _emit_tool_event(state, "execute_plan", "web_search_tool", "补充网页来源", "done", input_data={"query": query}, output_summary={"sources_count": len(research.get("sources", [])), "web_expanded_places_count": len(places), "food_places_count": len(lifestyle_places.get("foods", [])), "hotel_places_count": len(lifestyle_places.get("hotels", []))})
 
 
@@ -1982,11 +1988,14 @@ def _filter_reflection_blocked_places(candidates: list[dict], replan_context: di
 
 
 def _ensure_place_locations(places: list[dict]) -> list[dict]:
+    allow_external_geocode = settings.place_provider != "mock"
     for place in places:
         if place.get("provider") == "city_seed":
             _hydrate_place_from_map_search(place)
         _apply_reference_ticket_price(place)
         if place.get("location"):
+            continue
+        if not allow_external_geocode:
             continue
         if _is_unconfirmed_task_place(place):
             continue
@@ -3978,8 +3987,11 @@ def _extract_ticket_price(text: str) -> int | None:
     return None
 
 
-def _tool_result(tool_name: str, data: Any) -> dict[str, Any]:
-    return {"tool_name": tool_name, "status": "success", "data": data, "error": None}
+def _tool_result(tool_name: str, data: Any, input_data: Any = None) -> dict[str, Any]:
+    result = {"tool_name": tool_name, "status": "success", "data": data, "error": None}
+    if input_data is not None:
+        result["input"] = _compact_payload(input_data)
+    return result
 
 
 def _emit_tool_event(
