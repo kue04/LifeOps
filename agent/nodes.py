@@ -3167,7 +3167,10 @@ def _infer_task_type(text: str, llm_constraints: dict[str, Any], context: dict[s
         return "travel"
     if _has_meal_intent(text):
         return "meal"
-    if context.get("task_type") and any(word in text for word in ["太贵", "换", "改", "控制在", "轻松点", "重排"]):
+    if context.get("task_type") and any(
+        word in text
+        for word in ["太贵", "换", "改", "控制在", "轻松点", "重排", "不要", "别", "去掉", "删除", "移除", "取消"]
+    ):
         task_type = str(context.get("task_type"))
         return task_type if task_type in {"travel", "errand", "meal", "todo"} else "unknown"
     llm_type = str(llm_constraints.get("task_type") or "").strip()

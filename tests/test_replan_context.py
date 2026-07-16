@@ -41,6 +41,15 @@ class ReplanContextTest(unittest.TestCase):
         self.assertEqual(second["constraints"]["task_type"], "todo")
         self.assertEqual(second["final_plan"]["task_type"], "todo")
 
+    def test_remove_preference_followup_keeps_travel_intent(self) -> None:
+        first = run_lifeops("周六杭州玩一天，喜欢咖啡和展览。")
+
+        second = run_lifeops("不要咖啡店。", previous_result=first)
+
+        self.assertEqual(second["constraints"]["task_type"], "travel")
+        self.assertNotIn("咖啡", second["constraints"].get("preferences", []))
+        self.assertIn("咖啡", second["constraints"].get("avoid", []))
+
     def test_memory_overrides_disable_profile_values_for_current_run(self) -> None:
         state = AgentState(user_input="帮我安排今天", user_id="alice")
         state.constraints = {

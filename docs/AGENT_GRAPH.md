@@ -1,109 +1,107 @@
 # LifeOps Agent Graph
 
-LifeOps now uses LangGraph to orchestrate the planning flow. The public entry point is still `run_lifeops(...)`; FastAPI and the React frontend do not need to know whether the internals are a hand-written loop or a graph.
+## 根图
 
-## Current Graph
+FastAPI 和前端继续使用稳定入口 `run_lifeops(...)`。默认 `LIFEOPS_AGENT_MODE=multi_agent` 时，根图如下：
+
+```mermaid
+flowchart TD
+    A[constraint_extractor] --> B[date_resolver]
+    B --> C[load_memory]
+    C --> D{need_clarification}
+    D -->|需要补充| Z[END]
+    D -->|信息足够| E[Supervisor]
+    E --> F[Agent Dispatcher]
+    F --> G[Composer]
+    G --> H[Risk Checker]
+    H --> I{Critic}
+    I -->|final / ask_user| Z
+    I -->|revise 且 revision_round < 1| F
+```
+
+根图保留原节点对外名称：`planner`、`execute_plan`、`synthesize_plan`、`risk_checker`、`reflection`。因此已有 trace、SSE 事件和前端节点展示不需要重写。
+
+## Supervisor
+
+Supervisor 输入：
+
+- `user_input`
+- `constraints`
+- `intent_contract`
+- `previous_intent_contract`
+- `memory_resolution`
+
+输出由 `SupervisorDecision` 校验，包含主任务类型、策略和 1 至 4 个 `AgentTask`。校验项包括：
+
+- `task_id` 唯一；
+- 意图合同要求的 Specialist 不得缺失；
+- 主任务类型不得被 LLM 随意改写；
+- 依赖必须引用已存在任务；
+- 任务依赖不能形成环。
+
+LLM 未启用、Schema 非法、校验失败或调用异常时，系统使用规则 Supervisor 生成等价委派，并在 `planner_meta` 中记录来源、模型、回退原因和校验错误。
+
+## Specialist 子图
+
+每个 Specialist 都运行相同生命周期的独立 LangGraph 子图：
 
 ```text
-__start__
-  ↓
-constraint_extractor
-  ↓
-date_resolver
-  ↓
-load_memory
-  ↓
-need_clarification
-  ├─ end → __end__
-  └─ continue
-       ↓
-planner
-  ↓
-task_router
-  ├─ travel → travel_tool_router → travel_candidate_scorer → travel_plan_generator
-  ├─ errand → errand_tool_router → errand_candidate_scorer → errand_plan_generator
-  ├─ meal   → meal_tool_router   → meal_candidate_scorer   → meal_plan_generator
-  └─ todo   → todo_decomposer → todo_plan_generator
-  ↓
-risk_checker
-  ↓
-reflection
-  ├─ final → __end__
-  └─ replan → task branch start
+prepare -> execute_tools -> build_proposal -> END
 ```
 
-## Nodes
+`prepare` 深拷贝根 `AgentState`，把任务类型限制为当前领域，并清空候选、工具结果和最终计划。子图只把结构化 `AgentProposal` 与 `AgentRunRecord` 返回根图，不直接覆盖其他 Agent 状态。
 
-- `constraint_extractor`: extracts goal, city, date, budget, preferences, avoid rules, pace, origin, and destination hints.
-- `date_resolver`: normalizes relative dates such as `周六`, `明天`, and `下周六`.
-- `load_memory`: reads long-term user profile and merges useful preferences.
-- `need_clarification`: stops early when key information is missing.
-- `planner`: records the steps the agent intends to execute.
-- `task_router`: routes by `constraints.task_type`.
-- `travel_tool_router`: calls weather, web search, place, route, and budget helpers for travel/local outing plans.
-- `travel_candidate_scorer`: ranks candidate places against preferences, budget, weather, pace, and source quality.
-- `travel_plan_generator`: builds route, budget, final itinerary, alternatives, and assistant-facing travel plan data.
-- `errand_tool_router`: prepares lightweight place candidates for errand tasks without relying on weather or web search.
-- `errand_candidate_scorer`: keeps errand candidates available for route ordering.
-- `errand_plan_generator`: builds a route-aware errand timeline and `confirm_actions`.
-- `meal_tool_router`: prepares food place candidates for meal planning without relying on weather or web search.
-- `meal_candidate_scorer`: normalizes meal candidates.
-- `meal_plan_generator`: builds meal candidates, timeline, budget, and `confirm_actions`.
-- `todo_decomposer`: decomposes goals into todo items without map/weather calls.
-- `todo_plan_generator`: builds todo items, time blocks, acceptance criteria, and `confirm_actions`.
-- `risk_checker`: checks budget, weather, pace, and fallback risks.
-- `reflection`: reviews whether the plan can be returned or should be replanned once.
+| Agent | 工具白名单 | 主要输出 |
+|---|---|---|
+| Travel | weather, place_search, search, route, budget | itinerary, route, budget |
+| Meal | place_search, meal_pick, route, budget, confirm_action | meal_candidates, itinerary, budget |
+| Errand | place_search, errand_parse, route, budget, confirm_action | errand_items, itinerary, route |
+| Todo | todo_decompose, confirm_action | todo_items, time_blocks, acceptance_criteria |
 
-## Shared State
+Provider 使用 mock 或发生降级时，Agent 状态记为 `degraded`，警告写入 `agent_runs[].warnings`，而不是假装调用成功。
 
-The graph state wraps the existing `AgentState` object:
+## Composer
 
-```python
-{"state": AgentState(...)}
+单 Agent 时直接采用其 `plan_fragment`。多 Agent 时 Composer：
+
+1. 合并地点、餐饮、跑腿、待办和确认动作；
+2. 对地点和动作去重；
+3. 重新计算跨 Agent 路线；
+4. 重新估算并约束总预算；
+5. 生成混合任务时间线；
+6. 把 Agent Contract、运行记录和记忆解析元数据附加到最终计划。
+
+## Critic 与定向修订
+
+Risk Checker 先生成风险信息，Critic 再将反思结果转换为 `CriticDecision`：
+
+- `final`：直接返回；
+- `ask_user`：需要用户决策；
+- `revise`：按问题关键词映射到 Travel / Meal / Errand / Todo。
+
+修订时 Dispatcher 保留未命中的 Agent Proposal，只删除并重跑 `revision_targets` 指定的 Agent。`revision_round` 最大为 1，防止循环和不可控延迟。
+
+## 多轮上下文与记忆
+
+- `previous_result.constraints` 恢复上一轮硬约束；
+- `previous_intent_contract` 保留上一轮子任务；
+- 明确任务切换可替换旧任务，否则追加或修改原计划；
+- `memory_overrides` 记录本轮禁用/新增的偏好，避免用户说“不要咖啡”后又被长期画像重新注入；
+- SQLite 用户画像只作为默认偏好，不覆盖本轮明确输入。
+
+## 可观测性
+
+- 根节点 trace：输入/输出快照、耗时、异常；
+- Agent SSE：`agent_started`、`agent_completed`、`task_id`、`agent_name`、`revision_round`；
+- API 元数据：`planner_meta`、`agent_tasks`、`agent_runs`、`memory_resolution`、`critic`；
+- 前端详情页：展示委派、工具、状态、耗时、警告和修订结果。
+
+## Legacy 回滚
+
+设置以下变量可回到原单图实现：
+
+```env
+LIFEOPS_AGENT_MODE=legacy
 ```
 
-This keeps existing node functions unchanged. Important `AgentState` fields:
-
-- `user_input`: original user request.
-- `constraints`: extracted and normalized requirements.
-- `user_profile`: learned preferences.
-- `plan_steps`: planned execution steps.
-- `tool_results`: weather/search/place/route/budget outputs.
-- `candidates`: scored candidate places.
-- `final_plan`: structured plan for frontend rendering.
-- `risks` and `fallbacks`: risk checker outputs.
-- `reflection`: plan review result.
-- `replan_context` and `replan_count`: automatic replan control.
-- `execution_log`: human-readable node summaries for UI/debugging.
-- `trace_id`: stable id for traces and SSE events.
-
-## Branch Rules
-
-`need_clarification`:
-
-- If `state.clarification_question` is set, the graph ends immediately.
-- This prevents weather/search/place tools from running when user input is too vague.
-
-`reflection`:
-
-- If `state.reflection.next_action == "replan"` and `state.replan_count < 1`, the graph loops back to the start of the active task branch.
-- The automatic replan round runs through that branch's tool/decompose, scoring when applicable, plan generation, risk checking, and reflection.
-- Automatic replan is limited to one round to avoid infinite loops and long-running frontend requests.
-
-## Progress And Trace
-
-Each LangGraph node is wrapped by the same progress and trace behavior previously used by the hand-written loop:
-
-- `services.trace_logger.traced(...)` records node input/output snapshots.
-- `progress_callback` emits run/node/result events for `/runs/{trace_id}/events`.
-- Replan events include `round: "auto_replan"` so the frontend can distinguish the second pass.
-
-## Extension Notes
-
-Future LifeOps scenarios should add task branches without breaking the public `run_lifeops(...)` response contract.
-
-Recommended direction:
-
-- Keep travel/local outing flow as the default branch.
-- Add specialized tool/decomposer/scorer/generator branches for weekly/monthly planning.
-- Calendar writes, reminders, messages, purchases, or destructive memory changes must route through an explicit human confirmation node.
+两种模式共用 `run_lifeops(...)` 响应合同，便于灰度、回归和故障回滚。

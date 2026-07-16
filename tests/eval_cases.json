@@ -1,0 +1,114 @@
+[
+  {
+    "id": "travel_day_plan",
+    "category": "travel",
+    "turns": ["周六杭州玩一天，预算 500，喜欢展览和夜景。"],
+    "expected": {
+      "status": "success",
+      "task_type": "travel",
+      "agents": ["travel"],
+      "preferences_contains": ["展览", "夜景"],
+      "critic_passed": true
+    }
+  },
+  {
+    "id": "meal_plan",
+    "category": "meal",
+    "turns": ["今晚在杭州安排一顿火锅，预算 500。"],
+    "expected": {
+      "status": "success",
+      "task_type": "meal",
+      "agents": ["meal"],
+      "preferences_contains": ["火锅"],
+      "critic_passed": true
+    }
+  },
+  {
+    "id": "errand_route",
+    "category": "errand",
+    "turns": ["今天在杭州帮我安排取快递、买药和买菜，尽量顺路。"],
+    "expected": {
+      "status": "success",
+      "task_type": "errand",
+      "agents": ["errand"],
+      "critic_passed": true
+    }
+  },
+  {
+    "id": "todo_breakdown",
+    "category": "todo",
+    "turns": ["把准备 Python 面试拆成待办清单和时间块。"],
+    "expected": {
+      "status": "success",
+      "task_type": "todo",
+      "agents": ["todo"],
+      "critic_passed": true
+    }
+  },
+  {
+    "id": "mixed_travel_meal",
+    "category": "mixed",
+    "turns": ["周六去杭州看展，再安排一顿火锅。"],
+    "expected": {
+      "status": "success",
+      "task_type": "travel",
+      "agents": ["meal", "travel"],
+      "critic_passed": true
+    }
+  },
+  {
+    "id": "budget_replan",
+    "category": "replan",
+    "turns": [
+      "周六杭州玩一天，预算 500，喜欢展览。",
+      "太贵了，控制在 300。"
+    ],
+    "expected": {
+      "status": "success",
+      "task_type": "travel",
+      "agents": ["travel"],
+      "budget_max": 300,
+      "critic_passed": true
+    }
+  },
+  {
+    "id": "preference_removal_replan",
+    "category": "replan",
+    "turns": [
+      "周六杭州玩一天，喜欢咖啡和展览。",
+      "不要咖啡店。"
+    ],
+    "expected": {
+      "status": "success",
+      "task_type": "travel",
+      "agents": ["travel"],
+      "preferences_excludes": ["咖啡"],
+      "avoid_contains": ["咖啡"],
+      "critic_passed": true
+    }
+  },
+  {
+    "id": "missing_information",
+    "category": "clarification",
+    "turns": ["帮我安排一下。"],
+    "expected": {
+      "status": "need_clarification",
+      "task_type": "unknown",
+      "question_contains": ["城市/目的地", "日期"]
+    }
+  },
+  {
+    "id": "offline_provider_fallback",
+    "category": "provider_fallback",
+    "turns": ["周六杭州玩一天。"],
+    "expected": {
+      "status": "success",
+      "task_type": "travel",
+      "agents": ["travel"],
+      "planner_source": "rule_fallback",
+      "planner_fallback_reason": "llm_disabled",
+      "warnings_contain": ["mock_provider"],
+      "critic_passed": true
+    }
+  }
+]

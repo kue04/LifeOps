@@ -174,7 +174,7 @@ MVP 阶段建议支持以下工具：
 |---|---|---|
 | 短期记忆 | 当前对话、当前计划、用户刚刚修改的要求 | Agent State |
 | 长期偏好 | 喜欢咖啡、讨厌排队、预算偏好 | SQLite |
-| 历史任务 | 曾经生成过的计划、反馈、失败原因 | SQLite / Chroma |
+| 历史任务 | 曾经生成过的计划、反馈、失败原因 | SQLite |
 
 长期记忆示例：
 
@@ -287,7 +287,6 @@ SQLite
 高德地图 API
 OpenWeather API
 Tavily Search API
-Chroma / FAISS
 Streamlit
 ```
 

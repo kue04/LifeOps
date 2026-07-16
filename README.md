@@ -1,85 +1,106 @@
 # LifeOps Agent
 
-LifeOps Agent 是一个面向真实生活任务的 AI Agent 规划系统。它把用户的一句话需求拆解成可执行计划，并通过工具调用、候选评分、风险检查和执行记录，让大模型从“聊天回答”变成“可追踪的生活任务规划器”。
+LifeOps Agent 是一个面向出行、餐饮、跑腿和待办场景的生活规划系统。系统将自然语言需求转换为结构化意图合同，由 Supervisor 委派专项 Agent，经过工具执行、结果合并、风险检查和 Critic 复核，最终生成可执行、可追踪的计划。
 
-项目已完成后端 Agent、FastAPI 服务、React 前端、SQLite 记录、工具链封装、自动化测试和 Docker 化配置，可作为大模型应用工程/Agent 系统方向的面试展示项目。
+当前项目不是普通 Chatbot：它具备状态流转、任务拆解、工具调用、短期上下文、SQLite 用户画像、失败降级、定向修订和前端执行轨迹展示。
 
-## 系统功能
+## 当前能力
 
-- 自然语言任务理解：识别用户目标、时间、地点、预算、偏好、限制和任务类型。
-- 多工具协同规划：封装天气、地点、路线、网页搜索、预算和用户记忆等工具。
-- Agent 工作流编排：通过约束抽取、澄清判断、计划生成、候选评分、风险检查、反思修正形成闭环。
-- 可追踪执行记录：每次运行保存 trace、状态、工具结果和最终计划，便于复盘和调试。
-- 用户画像与反馈：保存偏好、避雷项和计划反馈，让系统具备持续优化的基础。
-- API 服务：提供 `/app/*` 计划生成、运行状态、历史记录、用户画像、反馈、审计和确认后日历导出能力。
-- React 前端：提供规划工作台、结果页、历史、画像、审计和展示页。
-- 本地调试界面：保留 Streamlit 页面，方便快速验证 Agent 输出。
-- 工程化交付：包含测试、Dockerfile、docker-compose、CI 配置和环境变量模板。
+- 识别任务类型、日期、地点、预算、偏好、避雷项、节奏和出发地/目的地角色。
+- 支持 `travel`、`meal`、`errand`、`todo` 以及混合任务。
+- 支持多轮重规划，例如修改预算、追加餐饮任务、删除已有偏好。
+- Supervisor 使用 Pydantic Contract 生成最多 4 个 `AgentTask`；LLM 不可用或决策非法时自动回退规则 Planner。
+- Travel / Meal / Errand / Todo Specialist 在隔离状态中运行各自 LangGraph 子图，并受严格工具白名单限制。
+- Composer 合并多个 `AgentProposal`，统一生成路线、预算、时间线和确认动作。
+- Risk Checker 与 Critic 检查预算、计划完整性等问题；最多进行一次定向修订，只重跑被判定有问题的 Agent。
+- SQLite 保存用户画像、任务历史和 trace；FastAPI 通过 SSE 输出节点与 Agent 级进度。
+- React 前端展示 Supervisor 来源、Agent 委派、工具、耗时、降级警告和 Critic 结果。
 
-## Agent 流程
+## Multi-Agent 流程
 
 ```text
-user input
--> constraint extractor
--> date resolver
--> memory tool
--> clarification check
--> planner
--> tools: weather / places / web search / route / budget
--> candidate scorer
--> plan generator
--> risk checker
--> reflection
--> final response
--> SQLite trace
+User Input
+  -> Constraint Extractor
+  -> Date Resolver
+  -> Memory Resolver
+  -> Clarification Gate
+  -> Supervisor
+  -> Travel / Meal / Errand / Todo Specialist Graphs
+  -> Composer
+  -> Risk Checker
+  -> Critic
+      -> Final
+      -> Targeted Revision (最多一次，只重跑目标 Agent)
 ```
 
-## 项目亮点
+`LIFEOPS_AGENT_MODE=multi_agent` 为默认模式；设置为 `legacy` 可切回原单图流程，便于回滚和对照测试。
 
-### 1. 从 Prompt Demo 到 Agent 工程闭环
+## 为什么使用 LangGraph
 
-项目不是单次调用大模型，而是把任务理解、工具调用、计划生成、风险控制和结果落库拆成清晰节点。每个节点都有明确输入输出，方便调试、测试和后续扩展。
+LangGraph 的意义不取决于是否使用多个 Agent。单 Agent 系统同样可以利用它管理：
 
-### 2. 多工具路由与证据驱动规划
+- 可持久化、可检查的共享状态；
+- 澄清、工具路由、人工确认和失败恢复等条件分支；
+- 有上限的重试与重规划，避免无限循环；
+- 节点级 trace、SSE 进度和确定性测试；
+- 将副作用放入明确节点，控制执行边界。
 
-系统根据任务类型选择不同工具链，把天气、地点、路线、搜索、预算和用户记忆整合进统一计划生成流程，体现了大模型应用中“LLM + Tools”的工程设计能力。
+本项目进一步把这些能力用于受控 Multi-Agent：根图负责状态和生命周期，Specialist 子图负责领域执行，Critic 只触发目标 Agent 的一次修订。相比自由对话式 Agent，这种设计更容易验证、回滚和展示。
 
-### 3. 可观测、可复盘、可测试
+## 工程亮点
 
-每次运行会留下 trace 和历史记录，测试覆盖任务分类、工具分支、日期解析、偏好反馈、风险检查和 API 导入等关键路径，避免 Agent 输出完全黑盒化。
+### 1. 结构化 Agent Contract
 
-### 4. 前后端可联动展示
+`AgentTask`、`SupervisorDecision`、`AgentProposal`、`AgentRunRecord` 和 `CriticDecision` 均由 Pydantic 校验，防止 Agent 之间使用不稳定的自然语言协议。
 
-后端提供 FastAPI 服务，前端项目 `lifeops-front` 提供可视化操作台和项目展示页，可以在面试中同时展示系统架构、业务流程和交互体验。
+### 2. 受控委派与安全回退
+
+Supervisor 决策会检查任务 ID、主任务类型、缺失 Agent、依赖合法性和循环依赖。LLM 输出失败时回退规则决策，保证主流程仍可用。
+
+### 3. 状态隔离与工具白名单
+
+每个 Specialist 深拷贝根状态，只处理自己的任务类型；工具集合固定在代码中，避免跨领域 Agent 随意调用无关工具或污染共享状态。
+
+### 4. 定向 Critic 修订
+
+Critic 将问题映射到对应 Agent，并通过 `revision_targets` 只重跑目标 Specialist。修订轮次限制为 1，兼顾计划质量、延迟和可预测性。
+
+### 5. 可观测与可评估
+
+API 返回 `planner_meta`、`agent_tasks`、`agent_runs`、`memory_resolution` 和 `critic`。仓库提供 9 个确定性离线评估场景，覆盖单领域、混合任务、重规划、澄清和 Provider 回退。
 
 ## 技术栈
 
 - Python 3.11+
-- FastAPI
-- Pydantic
-- SQLite
-- Streamlit
-- LangGraph Agent workflow
+- FastAPI / Pydantic
+- LangGraph
 - OpenAI-compatible LLM client
-- OpenMeteo / OpenStreetMap / Web Search 工具封装
+- SQLite
+- OpenMeteo / OpenStreetMap / Web Search 工具适配层
 - unittest
+- React + TypeScript 前端
 - Docker / docker-compose
 
 ## 项目结构
 
 ```text
 LifeOps/
-├── agent/              # Agent 状态、节点、提示词和工作流编排
-├── tools/              # 天气、地点、路线、搜索、预算、记忆等工具
-├── services/           # LLM 客户端、评分、风险检查、日期解析、trace 记录
-├── storage/            # SQLite schema 与读写逻辑
-├── tests/              # 单元测试与流程测试
-├── docs/               # API、开发说明和 Agent 图文档
-├── api.py              # FastAPI 服务入口
-├── app.py              # Streamlit 调试界面
-├── config.py           # 环境配置
-├── docker-compose.yml  # 本地容器编排
-└── requirements.txt
+├── agent/
+│   ├── contracts.py       # Agent 间 Pydantic Contract
+│   ├── multi_agent.py     # Supervisor、Dispatcher、Composer
+│   ├── specialists.py     # 4 个 Specialist LangGraph 子图
+│   ├── critic.py          # Critic 与定向修订目标
+│   ├── graph.py           # 根图、分支、SSE 生命周期
+│   └── nodes.py           # 约束、工具、计划等领域节点
+├── tools/                 # 天气、地点、路线、搜索、预算、记忆工具
+├── services/              # LLM、日期、风险、trace 等服务
+├── storage/               # SQLite schema 与读写
+├── tests/                 # 单元、流程与离线评估数据
+├── scripts/               # 开发脚本与离线评估入口
+├── docs/                  # 架构、API、路线图和实施记录
+├── api.py                 # FastAPI 入口
+├── app.py                 # Streamlit 调试界面
+└── config.py              # Provider 与 Agent 模式配置
 ```
 
 ## 快速运行
@@ -88,15 +109,10 @@ LifeOps/
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-启动 API 服务：
-
-```powershell
 uvicorn api:app --reload
 ```
 
-启动 React 前端：
+前端：
 
 ```powershell
 cd D:\llm\lifeops-front
@@ -105,41 +121,25 @@ $env:VITE_LIFEOPS_API_BASE="http://localhost:8000"
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-运行测试：
+验证：
 
 ```powershell
 python -m unittest discover -s tests
-```
-
-使用 Docker：
-
-```powershell
-docker compose up --build
+python scripts/evaluate_agent.py
 ```
 
 ## 环境变量
 
-复制 `.env.example` 为 `.env`，按需配置模型和工具提供方。项目默认保留无 Key 工具的兜底能力，真实 Key 不应提交到仓库。
+复制 `.env.example` 为 `.env`。未配置模型 Key 时 Supervisor 自动使用规则回退；工具 Provider 也保留 mock/无 Key 降级路径。
 
 ```env
+LIFEOPS_AGENT_MODE=multi_agent
 LIFEOPS_LLM_MODE=deepseek
-DEEPSEEK_API_KEY=your_deepseek_key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_API_KEY=
 
 WEATHER_PROVIDER=openmeteo
 PLACE_PROVIDER=osm
-AMAP_API_KEY=
-
 SEARCH_PROVIDER=auto
-BOCHA_API_KEY=
-SEARCH_FRESHNESS=noLimit
-SEARCH_SUMMARY=true
-SEARCH_COUNT=8
 ```
 
-## 前端展示
-
-配套前端仓库：`D:\llm\lifeops-front`
-
-前端提供计划输入、执行状态、计划详情、历史记录、用户画像、审计和项目展示页。面试展示时可以先从前端介绍产品体验，再切回本仓库说明 Agent 工作流和后端工程实现。
+配套前端仓库位于 `D:\llm\lifeops-front`。
