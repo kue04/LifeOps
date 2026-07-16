@@ -24,6 +24,7 @@ _load_dotenv()
 class Settings:
     db_path: str = os.getenv("LIFEOPS_DB_PATH", "lifeops.sqlite3")
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
+    agent_mode: str = os.getenv("LIFEOPS_AGENT_MODE", "multi_agent")
     llm_mode: str = os.getenv("LIFEOPS_LLM_MODE", "mock")
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")

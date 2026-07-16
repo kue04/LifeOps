@@ -18,6 +18,13 @@ class AgentState:
     artifacts: dict[str, Any] = field(default_factory=dict)
     user_profile: dict[str, Any] = field(default_factory=dict)
     memory_resolution: dict[str, Any] = field(default_factory=dict)
+    supervisor_decision: dict[str, Any] = field(default_factory=dict)
+    planner_meta: dict[str, Any] = field(default_factory=dict)
+    agent_tasks: list[dict[str, Any]] = field(default_factory=list)
+    agent_proposals: list[dict[str, Any]] = field(default_factory=list)
+    agent_runs: list[dict[str, Any]] = field(default_factory=list)
+    critic_decision: dict[str, Any] = field(default_factory=dict)
+    revision_round: int = 0
     plan_steps: list[dict[str, Any]] = field(default_factory=list)
     tool_results: list[dict[str, Any]] = field(default_factory=list)
     candidates: list[dict[str, Any]] = field(default_factory=list)
