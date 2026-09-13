@@ -361,7 +361,7 @@ class DynamicIntentTest(unittest.TestCase):
         with (
             patch("agent.nodes.search_places", return_value=MOCK_PLACES),
             patch("agent.nodes.get_weather", side_effect=fast_weather),
-            patch("agent.nodes.search_web", return_value={"provider": "mock", "results": [], "note": "mock"}),
+            patch("agent.search.search_web", return_value={"provider": "mock", "results": [], "note": "mock"}),
         ):
             result = run_lifeops("周六杭州轻松玩一天，预算500，想看展和夜景")
 
@@ -389,7 +389,7 @@ class DynamicIntentTest(unittest.TestCase):
             patch("agent.nodes._llm_enabled", return_value=False),
             patch("agent.nodes.search_places", side_effect=hangzhou_search_places),
             patch("agent.nodes.get_weather", side_effect=fast_weather),
-            patch("agent.nodes.search_web", return_value=web_result),
+            patch("agent.search.search_web", return_value=web_result),
         ):
             result = run_lifeops("明天杭州轻松玩一天，预算500，要看看美食和住宿")
 
@@ -410,7 +410,7 @@ class DynamicIntentTest(unittest.TestCase):
             patch("agent.nodes._llm_enabled", return_value=False),
             patch("agent.nodes.search_places", side_effect=chengdu_search_places),
             patch("agent.nodes.get_weather", side_effect=fast_weather),
-            patch("agent.nodes.search_web", return_value={"provider": "mock", "query": "成都 火锅", "results": [], "note": "mock"}),
+            patch("agent.search.search_web", return_value={"provider": "mock", "query": "成都 火锅", "results": [], "note": "mock"}),
         ):
             result = run_lifeops("明天我想要去成都玩 有没有好玩的地方 我还想吃火锅")
 
@@ -426,7 +426,7 @@ class DynamicIntentTest(unittest.TestCase):
             patch("agent.nodes._llm_enabled", return_value=False),
             patch("agent.nodes.search_places", side_effect=meishan_search_places),
             patch("agent.nodes.get_weather", side_effect=fast_weather),
-            patch("agent.nodes.search_web", return_value={"provider": "mock", "query": "眉山 火锅", "results": [], "note": "mock"}),
+            patch("agent.search.search_web", return_value={"provider": "mock", "query": "眉山 火锅", "results": [], "note": "mock"}),
         ):
             result = run_lifeops("想去眉山旅游，吃火锅")
 
@@ -475,7 +475,7 @@ class DynamicIntentTest(unittest.TestCase):
             patch("agent.nodes._llm_enabled", return_value=False),
             patch("agent.nodes.search_places", side_effect=meishan_search_places),
             patch("agent.nodes.get_weather", side_effect=fast_weather),
-            patch("agent.nodes.search_web", return_value=web_result),
+            patch("agent.search.search_web", return_value=web_result),
         ):
             result = run_lifeops("想去眉山旅游，吃火锅")
 

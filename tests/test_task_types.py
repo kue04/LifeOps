@@ -52,7 +52,7 @@ class TaskTypeTest(unittest.TestCase):
         with (
             patch("agent.nodes.get_weather", return_value={"city": "洛阳", "provider": "mock"}),
             patch("agent.nodes.search_places", return_value=[]),
-            patch("agent.nodes.search_web") as search_web,
+            patch("agent.search.search_web") as search_web,
         ):
             result = travel_tool_router(state)
 
