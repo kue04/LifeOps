@@ -5,7 +5,8 @@ from contextlib import contextmanager
 from unittest.mock import patch
 
 from agent import graph
-from agent.nodes import _filter_reflection_blocked_places, final_response
+from agent.nodes import final_response
+from agent.scoring import _filter_reflection_blocked_places
 from agent.state import AgentState
 
 
