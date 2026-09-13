@@ -12,7 +12,6 @@ import requests
 from config import settings
 from services.geocoder import geocode_city, geocode_place
 
-
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "mock_places.json"
 AMAP_MAX_KEYWORDS = 4
 AMAP_MAX_PLACES = 20

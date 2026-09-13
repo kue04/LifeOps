@@ -11,17 +11,16 @@ from agent.prompts import CONSTRAINT_EXTRACTOR_PROMPT, PLAN_GENERATOR_PROMPT, PL
 from agent.state import AgentState
 from config import settings
 from services.date_resolver import resolve_date_text
+from services.geocoder import geocode_place
 from services.llm_client import llm_client
 from services.risk_checker import check_risks
 from services.scorer import score_candidates
-from services.geocoder import geocode_city, geocode_place
 from tools.budget import estimate_budget
 from tools.memory import load_user_profile
 from tools.places import search_places
 from tools.route import estimate_access_route, estimate_route
-from tools.web_search import search_web
 from tools.weather import get_weather
-
+from tools.web_search import search_web
 
 PREFERENCE_WORDS = ["咖啡", "展览", "夜景", "美食", "火锅", "川菜", "小吃", "茶馆", "书店", "公园", "博物馆", "散步", "爬山", "徒步", "登山", "海边"]
 AVOID_WORDS = ["太累", "太赶", "排队", "室外", "太贵"]
@@ -2340,7 +2339,9 @@ def _validate_destination_plan(state: AgentState, itinerary: list[dict]) -> dict
 
 
 def _is_city_name(name: str, city: str) -> bool:
-    normalize = lambda value: value.replace("市", "").strip()
+    def normalize(value: str) -> str:
+        return value.replace("市", "").strip()
+
     return bool(name and city and normalize(name) == normalize(city))
 
 
@@ -2855,7 +2856,6 @@ def _guide_place_line(item: dict[str, Any]) -> str:
 
 
 def _guide_meal_line(item: dict[str, Any]) -> str:
-    name = item.get("name") or "餐饮候选"
     address = item.get("address") or item.get("area") or "地址待确认"
     tags = "、".join(item.get("tags") or [])
     reason = item.get("reason") or "适合作为本次用餐候选，排队和营业时间出发前确认。"

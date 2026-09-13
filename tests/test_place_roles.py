@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 from agent.graph import _replan_nodes, run_lifeops
 
-
 KUNMING_AMAP_PLACES = [
     {
         "name": "洛龙公园",

@@ -13,3 +13,13 @@ data/dev-*.log
 data/frontend-smoke-*.png
 dist/
 node_modules/
+
+# 测试与静态分析产物
+.coverage
+coverage.xml
+htmlcov/
+.ruff_cache/
+.pytest_cache/
+
+# 本地工作区
+.workbuddy/

@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 from agent.graph import run_lifeops
 
-
 MOCK_PLACES = [
     {
         "name": "安静餐厅",

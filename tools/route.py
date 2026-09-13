@@ -156,7 +156,4 @@ def _estimate_amap_driving(origin: dict, destination: dict) -> dict | None:
 
 
 def _map_url(origin: str, destination: str) -> str:
-    return "https://ditu.amap.com/dir?from%5Bname%5D={}&to%5Bname%5D={}".format(
-        quote(origin),
-        quote(destination),
-    )
+    return f"https://ditu.amap.com/dir?from%5Bname%5D={quote(origin)}&to%5Bname%5D={quote(destination)}"

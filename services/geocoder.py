@@ -5,7 +5,6 @@ from pathlib import Path
 
 import requests
 
-
 CACHE_PATH = Path(__file__).resolve().parents[1] / "data" / "geocode_cache.json"
 
 SEED_COORDS = {

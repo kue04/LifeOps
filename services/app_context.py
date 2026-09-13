@@ -5,7 +5,6 @@ from typing import Annotated
 
 from fastapi import Header
 
-
 ROLES = {"user", "operator_admin"}
 
 
