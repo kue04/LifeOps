@@ -1,5 +1,11 @@
 # LifeOps Agent
 
+[![CI](https://github.com/kue04/LifeOps/actions/workflows/ci.yml/badge.svg)](https://github.com/kue04/LifeOps/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![License](https://img.shields.io/badge/License-MIT-green)
+![Tests](https://img.shields.io/badge/tests-52%20passing-brightgreen)
+![Code style](https://img.shields.io/badge/lint-ruff-261230)
+
 LifeOps Agent 是一个面向真实生活任务的 AI Agent 规划系统。它把用户的一句话需求拆解成可执行计划，并通过工具调用、候选评分、风险检查和执行记录，让大模型从“聊天回答”变成“可追踪的生活任务规划器”。
 
 项目已完成后端 Agent、FastAPI 服务、React 前端、SQLite 记录、工具链封装、自动化测试和 Docker 化配置，可作为大模型应用工程/Agent 系统方向的面试展示项目。
@@ -50,7 +56,38 @@ user input
 
 ### 4. 前后端可联动展示
 
-后端提供 FastAPI 服务，前端项目 `lifeops-front` 提供可视化操作台和项目展示页，可以在面试中同时展示系统架构、业务流程和交互体验。
+后端提供 FastAPI 服务，前端项目 [lifeops-front](https://github.com/kue04/lifeops-front) 提供可视化操作台和项目展示页，可以在面试中同时展示系统架构、业务流程和交互体验。
+
+## 重构前后对比
+
+项目早期把全部 Agent 逻辑写在一个 `agent/nodes.py` 里（4391 行 / 255 个函数）。
+后按"先建调用图、算传递闭包、再整组搬迁"的方式拆成 16 个职责单一模块，
+全程以现有 52 个测试锁行为，每步搬迁后测试必须全绿。
+
+| 指标 | 重构前 | 重构后 |
+| --- | --- | --- |
+| `agent/nodes.py` 行数 | 4391 | 852（-81%） |
+| 单文件最大行数 | 4391 | 852 |
+| agent/ 模块数 | 5 | 16 |
+| nodes.py 覆盖率 | 79% | 83% |
+| 整体覆盖率（agent/services/tools/storage） | 74% | 75% |
+| pytest/unittest 用例数 | 52 | 52（全程保持全绿） |
+| ruff 检查 | 未接入 | 通过（E4/E7/E9/F/I/UP） |
+
+拆分后的模块划分：
+
+| 模块 | 职责 |
+| --- | --- |
+| `agent/nodes.py` | 图节点入口与编排（`__all__` 声明公开 API） |
+| `agent/constants.py` | 领域常量词典（城市、偏好词、参考票价） |
+| `agent/intent.py` / `intent_signals.py` | 约束抽取与规则式意图判定 |
+| `agent/place_utils.py` / `place_selection.py` | 地点工具与候选筛选 |
+| `agent/search.py` | 网页检索与攻略证据 |
+| `agent/tool_router.py` | 按任务类型编排工具链 |
+| `agent/dynamic_steps.py` | 动态执行计划逐步调用 |
+| `agent/plan_builders.py` / `timeline.py` | 计划构建与时间线校验 |
+| `agent/scoring.py` | 候选评分、风险检查、反思修正 |
+| `agent/guide_messages.py` / `text_utils.py` | 文案渲染与格式化 |
 
 ## 技术栈
 
