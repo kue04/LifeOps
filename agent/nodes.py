@@ -8,25 +8,38 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 from agent.constants import (
-    AVOID_WORDS,
-    CITY_GUIDE_INTROS,
     FAMOUS_DESTINATIONS,
-    KNOWN_CITIES,
-    LOCAL_FOOD_TIPS_BY_CITY,
     NATIONAL_CHAIN_MEAL_WORDS,
     POPULAR_PLACE_KEYWORDS_BY_CITY,
     PREFERENCE_WORDS,
     TASK_TYPES,
 )
+from agent.guide_messages import (
+    _build_assistant_message,
+    _build_assistant_message_from_plan,
+    _guide_place_candidates,
+    _is_city_placeholder_place,
+    _is_national_chain_meal,
+)
+from agent.intent import (
+    _extract_avoid,
+    _extract_city_hint,
+    _extract_errand_items,
+    _extract_place_names_from_search,
+    _extract_place_roles,
+    _extract_with_llm,
+    _has_hard_reflection_issue,
+    _looks_like_travel_request,
+    _parse_todo_goal,
+    _todo_time_blocks,
+)
 from agent.intent_signals import (
-    _activity_intent,
     _allowed_dynamic_tools,
     _coverage_issue,
     _covered_preferences,
     _dynamic_city,
     _is_mixed_intent,
     _is_mountain_or_hiking_trip,
-    _is_negated,
     _is_travel_guide_plan,
     _issue_requires_replan,
     _legacy_tool_name,
@@ -48,20 +61,16 @@ from agent.place_utils import (
     _all_popular_keywords,
     _apply_reference_ticket_price,
     _city_guide_search_batches,
-    _city_in_text,
     _city_search_context_terms,
     _city_travel_search_preferences,
-    _clean_place_text,
     _coordinates,
     _dedupe_places,
     _destination_tags,
     _estimate_access_route_if_needed,
     _explicit_non_default_city,
     _first_place_provider,
-    _is_broad_region_hint,
     _is_city_name,
     _is_encyclopedia_host,
-    _is_origin_phrase,
     _is_too_similar,
     _is_unconfirmed_task_place,
     _lifestyle_search_batches,
@@ -77,27 +86,19 @@ from agent.place_utils import (
     _seed_place_tags,
     _seed_play_points,
 )
-from agent.prompts import CONSTRAINT_EXTRACTOR_PROMPT, PLAN_GENERATOR_PROMPT, PLANNER_PROMPT, REFLECTION_PROMPT
+from agent.prompts import PLAN_GENERATOR_PROMPT, PLANNER_PROMPT, REFLECTION_PROMPT
 from agent.state import AgentState
 from agent.text_utils import (
-    _access_route_message,
     _artifact_summary,
-    _budget_message,
     _budget_preview,
     _budget_summary,
-    _build_todo_message,
     _compact_payload,
     _confirm_actions_for,
     _constrain_mixed_budget,
-    _cost_text,
     _dedupe_execution_steps,
     _dedupe_sub_tasks,
     _dedupe_text_parts,
-    _duration_from_time,
-    _errand_duration,
-    _errand_success_criteria,
     _evidence_preview,
-    _execution_summary,
     _extract_current_location,
     _extract_famous_destination,
     _extract_lifestyle_places,
@@ -106,19 +107,11 @@ from agent.text_utils import (
     _extract_trip_days,
     _filter_places_by_city,
     _first_match,
-    _guide_city,
-    _guide_place_category,
-    _guide_place_key,
-    _guide_place_score,
-    _guide_practical_tips,
     _has_errand_intent,
     _has_meal_intent,
     _has_todo_intent,
     _intent_contract_issues,
     _intent_has,
-    _linked_named_item,
-    _linked_place,
-    _linked_source,
     _llm_enabled,
     _llm_model_name,
     _log,
@@ -127,10 +120,7 @@ from agent.text_utils import (
     _mixed_item_reason,
     _places_preview,
     _recommendation_basis,
-    _recommendation_basis_message,
-    _research_plan_note,
     _route_preview,
-    _route_scope,
     _route_summary,
     _search_preview,
     _search_result_key,
@@ -138,7 +128,6 @@ from agent.text_utils import (
     _selection_quality,
     _summary,
     _time_label,
-    _weather_advice,
     _weather_summary,
     _with_quality_warning,
 )
@@ -859,25 +848,10 @@ def final_response(state: AgentState) -> dict[str, Any]:
 
 
 
-def _has_hard_reflection_issue(reflection: dict[str, Any]) -> bool:
-    issues = _reflection_issues(reflection)
-    hard_words = ["超过用户限制", "没有生成", "目的地与用户目标不符", "缺少从出发地到目的地", "没有安排该目的地"]
-    return any(any(word in issue for word in hard_words) for issue in issues)
 
 
 
 
-def _extract_with_llm(text: str) -> dict[str, Any]:
-    if not _llm_enabled():
-        return {}
-    try:
-        result = llm_client.json_complete(CONSTRAINT_EXTRACTOR_PROMPT, text)
-    except Exception:
-        return {}
-    if result.get("mode") == "mock":
-        return {}
-    result["_llm_used"] = True
-    return result
 
 
 def _generate_plan_with_llm(state: AgentState, route: dict, budget: dict, base_plan: dict[str, Any]) -> dict[str, Any] | None:
@@ -1225,16 +1199,6 @@ def _expand_places_from_search_results(places: list[dict[str, Any]], search: dic
     return _dedupe_places(places + _enrich_places_with_search_evidence(discovered, search))
 
 
-def _extract_place_names_from_search(search: dict[str, Any]) -> list[str]:
-    names: list[str] = []
-    pattern = re.compile(r"[\u4e00-\u9fff]{2,12}(?:风景区|景区|博物馆|美术馆|公园|古镇|老街|花市|湿地|民族村|村|寺|祠|楼|塔|坊|湖|池|山|街|巷|园|林|城)")
-    for result in search.get("results") or []:
-        text = " ".join(str(result.get(key, "")) for key in ["name", "title", "summary", "snippet", "content"])
-        for match in pattern.findall(text):
-            name = match.strip(" ，。、：:；;（）()【】[]")
-            if _looks_like_search_place_name(name):
-                names.append(name)
-    return list(dict.fromkeys(names))
 
 
 
@@ -2058,36 +2022,6 @@ def _build_alternatives(candidates: list[dict], selected: list[dict]) -> list[di
 
 
 
-def _guide_place_candidates(places: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    food_tags = {"美食", "火锅", "川菜", "小吃", "茶馆", "酒店", "住宿"}
-    result = []
-    for place in places:
-        name = place.get("name")
-        if not name or _is_city_placeholder_place(place):
-            continue
-        if set(place.get("tags") or []).intersection(food_tags):
-            continue
-        if any(word in str(name) for word in ["游客中心", "政务中心", "委员会", "停车场", "牌坊", "公交站", "物业", "酒店", "客栈", "民宿", "运营中心", "售票", "大厅", "广场", "涵松苑"]):
-            continue
-        result.append({
-            "place": name,
-            "area": place.get("area"),
-            "address": place.get("address"),
-            "map_url": place.get("map_url"),
-            "tags": place.get("tags") or [],
-            "play_points": place.get("play_points") or [],
-            "evidence": place.get("evidence") or [],
-            "popularity_score": place.get("popularity_score") or 0,
-        })
-    deduped = []
-    seen = set()
-    for item in sorted(result, key=lambda item: (_guide_place_score(item), int(item.get("popularity_score") or 0)), reverse=True):
-        key = _guide_place_key(str(item.get("place") or ""))
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
-    return deduped[:16]
 
 
 def _filter_travel_places(places: list[dict], preferences: list[str] | None = None) -> list[dict]:
@@ -2165,12 +2099,6 @@ def _search_city_trip_places(city: str, state: AgentState) -> list[dict[str, Any
     return _filter_places_by_city(places, city)
 
 
-def _is_city_placeholder_place(place: dict[str, Any]) -> bool:
-    name = str(place.get("name") or "").strip()
-    city = str(place.get("city") or "").strip()
-    if not name or not city:
-        return False
-    return _is_city_name(name, city)
 
 
 def _is_broad_city_sightseeing_request(state: AgentState) -> bool:
@@ -2187,258 +2115,6 @@ def _is_broad_city_sightseeing_request(state: AgentState) -> bool:
 
 
 
-def _build_assistant_message(state: AgentState) -> str:
-    return _build_assistant_message_from_plan(state.final_plan or {})
-
-
-def _build_assistant_message_from_plan(plan: dict[str, Any]) -> str:
-    if plan.get("task_type") == "todo":
-        return _build_todo_message(plan)
-    if plan.get("task_type") in {"errand", "meal"}:
-        return _build_life_task_message(plan)
-    if _is_travel_guide_plan(plan):
-        return _build_travel_guide_message(plan)
-    itinerary = plan.get("itinerary", [])
-    title = plan.get("title", "这份计划")
-    budget = plan.get("budget", {})
-    risks = plan.get("risks", [])
-    summary = plan.get("summary") or ""
-    weather = plan.get("weather") or {}
-    research = plan.get("travel_research") or {}
-    lifestyle = plan.get("lifestyle_places") or {}
-    access_route = plan.get("access_route") or {}
-    lines = [f"**{title}**"]
-    lines.append(_execution_summary(research, weather))
-    if weather:
-        lines.append(
-            f"**天气与节奏**：{weather.get('date', '当天')} {weather.get('condition', '未知')}，"
-            f"{weather.get('temperature', '温度未知')}。{_weather_advice(weather)}"
-        )
-    research_note = _research_plan_note(research)
-    if research_note:
-        lines.append(research_note)
-    basis_note = _recommendation_basis_message(plan.get("recommendation_basis") or {})
-    if basis_note:
-        lines.append(basis_note)
-    if access_route.get("needed"):
-        lines.append(_access_route_message(access_route))
-    if itinerary:
-        lines.append("**到达后怎么玩**")
-        for item in itinerary:
-            place = _linked_place(item)
-            play_points = "；".join(item.get("play_points", [])[:3])
-            details = [
-                f"- **{item['time']} | {place}**",
-                f"  地址：{item.get('address') or item.get('area', '待确认')}；建议停留：{_duration_from_time(item.get('time', ''))}",
-            ]
-            cost_text = _cost_text(item)
-            if cost_text:
-                details.append(f"  费用：{cost_text}")
-            evidence = item.get("evidence", [])
-            if evidence:
-                details.append("  搜索依据：" + "；".join(evidence[:2]))
-            if play_points:
-                details.append(f"  怎么玩：{play_points}")
-            if item.get("reason"):
-                details.append(f"  为什么放这里：{item['reason']}")
-            lines.append("\n".join(details))
-    if summary:
-        lines.append(summary)
-    alternatives = plan.get("alternatives") or []
-    if alternatives:
-        lines.append("**方案二：可替换玩法**")
-        for item in alternatives[:4]:
-            parts = [f"- {_linked_place({'place': item['name'], 'map_url': item.get('map_url')})}"]
-            if item.get("address"):
-                parts.append(f"地址：{item['address']}")
-            play_points = "；".join(item.get("play_points", [])[:2])
-            if play_points:
-                parts.append(f"亮点：{play_points}")
-            lines.append("  ".join(parts))
-    if budget:
-        lines.append(_budget_message(budget))
-    living_tips = _living_tips(plan, lifestyle)
-    if living_tips:
-        lines.append(living_tips)
-    if risks:
-        lines.append("**提醒**：" + "；".join(risks))
-    sources = research.get("sources") or []
-    if sources:
-        lines.append("**参考来源**：" + "；".join(_linked_source(item) for item in sources[:4]))
-    return "\n\n".join(lines)
-
-
-
-
-
-
-def _build_travel_guide_message(plan: dict[str, Any]) -> str:
-    city = _guide_city(plan)
-    weather = plan.get("weather") or {}
-    research = plan.get("travel_research") or {}
-    budget = plan.get("budget") or {}
-    risks = plan.get("risks") or []
-    places = _guide_places(plan)
-    meals = _guide_meals(plan.get("meal_candidates") or (plan.get("lifestyle_places") or {}).get("foods") or [])
-    lines = [f"**{city}美食 + 美景攻略**"]
-    lines.append(CITY_GUIDE_INTROS.get(city, f"这份攻略围绕{city}的核心景点、餐饮和顺路动线来安排，适合直接拿去做出行参考。"))
-    lines.append(_execution_summary(research, weather))
-    basis_note = _recommendation_basis_message(plan.get("recommendation_basis") or {})
-    if basis_note:
-        lines.append(basis_note)
-    if weather:
-        lines.append(
-            f"**天气与节奏**：{weather.get('date', '当天')} {weather.get('condition', '未知')}，"
-            f"{weather.get('temperature', '温度未知')}。{_weather_advice(weather)}"
-        )
-    if places:
-        lines.append("**必打卡景点**")
-        lines.extend(_guide_place_line(item) for item in places[:5])
-    if meals:
-        lines.append("**火锅精选推荐**")
-        lines.extend(_guide_meal_line(item) for item in meals[:5])
-    food_tips = LOCAL_FOOD_TIPS_BY_CITY.get(city) or []
-    if food_tips:
-        lines.append("**风味美食 & 经典小吃**")
-        lines.extend(f"- {item}" for item in food_tips)
-    itinerary = plan.get("itinerary") or []
-    if itinerary:
-        lines.append("**精选行程规划**")
-        lines.extend(_guide_itinerary_line(item) for item in itinerary)
-    if budget:
-        lines.append(_budget_message(budget))
-    tips = _guide_practical_tips(city, plan)
-    if tips:
-        lines.append("**出行实用贴士**")
-        lines.extend(f"- {tip}" for tip in tips)
-    if risks:
-        lines.append("**提醒**：" + "；".join(risks))
-    sources = research.get("sources") or []
-    if sources:
-        lines.append("**参考来源**：" + "；".join(_linked_source(item) for item in sources[:4]))
-    return "\n\n".join(lines)
-
-
-
-
-def _guide_places(plan: dict[str, Any]) -> list[dict[str, Any]]:
-    food_tags = {"美食", "火锅", "川菜", "小吃", "茶馆"}
-    items: list[dict[str, Any]] = []
-    for item in plan.get("itinerary") or []:
-        if not set(item.get("tags") or []).intersection(food_tags):
-            items.append(item)
-    for item in plan.get("guide_places") or []:
-        items.append(item)
-    for item in plan.get("alternatives") or []:
-        items.append({
-            "place": item.get("name"),
-            "area": item.get("address") or "",
-            "address": item.get("address"),
-            "map_url": item.get("map_url"),
-            "tags": item.get("tags") or [],
-            "play_points": item.get("play_points") or [],
-        })
-    sorted_items = sorted(items, key=_guide_place_score, reverse=True)
-    seen = set()
-    result = []
-    for category in ["culture", "water_street", "pickle", "ancient_town", "mountain", "view", "museum"]:
-        match = next(
-            (
-                item for item in sorted_items
-                if _guide_place_category(item) == category
-                and _guide_place_key(str(item.get("place") or item.get("name") or "")) not in seen
-            ),
-            None,
-        )
-        if match:
-            key = _guide_place_key(str(match.get("place") or match.get("name") or ""))
-            seen.add(key)
-            result.append(match)
-    for item in sorted_items:
-        name = item.get("place") or item.get("name")
-        key = _guide_place_key(str(name or ""))
-        if not name or key in seen:
-            continue
-        seen.add(key)
-        result.append(item)
-    return result
-
-
-
-
-def _guide_meals(meals: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    local_meals = [item for item in meals if not _is_national_chain_meal(item)]
-    return local_meals if len(local_meals) >= 3 else meals
-
-
-
-
-
-
-def _guide_place_line(item: dict[str, Any]) -> str:
-    name = item.get("place") or item.get("name") or "景点"
-    area = item.get("area") or item.get("address") or "地址待确认"
-    tags = set(item.get("tags") or [])
-    points = "；".join(item.get("play_points") or [])
-    if "爬山" in tags or "运动" in tags:
-        reason = "自然风光和徒步体验更强，建议预留半天到一天，雨天注意防滑。"
-    elif any(word in str(name) for word in ["祠", "故居", "三苏"]):
-        reason = "适合放在上午慢慢看，重点感受东坡文化和老城人文底色。"
-    elif "泡菜" in str(name):
-        reason = "适合了解东坡泡菜和地方饮食文化，也适合作为轻量室内段。"
-    elif "博物馆" in tags or "展览" in tags:
-        reason = "适合了解地方文化，也能作为天气不稳时的室内段。"
-    elif any(word in str(name) for word in ["街", "水街", "老街", "古镇"]):
-        reason = "适合慢逛、拍照和安排夜景，餐后散步也顺手。"
-    elif "楼" in str(name):
-        reason = "适合登楼或临江观景，作为市区文化散步的一段。"
-    else:
-        reason = points or "适合作为城市游主线点位，出发前确认开放时间。"
-    return f"- **{_linked_place(item)}**：{area}。{reason}"
-
-
-def _guide_meal_line(item: dict[str, Any]) -> str:
-    address = item.get("address") or item.get("area") or "地址待确认"
-    tags = "、".join(item.get("tags") or [])
-    reason = item.get("reason") or "适合作为本次用餐候选，排队和营业时间出发前确认。"
-    cost = int(item.get("estimated_cost") or 0)
-    cost_text = f"；参考人均约 {cost} 元" if cost else ""
-    return f"- **{_linked_named_item(item)}**：{tags or '餐饮'}；{reason}{cost_text}；地址：{address}"
-
-
-def _guide_itinerary_line(item: dict[str, Any]) -> str:
-    place = _linked_place(item)
-    points = "；".join(item.get("play_points") or [])
-    suffix = f"。{points}" if points else ""
-    return f"- **{item.get('time', '时间待定')} | {place}**：{item.get('address') or item.get('area') or '地点待确认'}{suffix}"
-
-
-
-
-
-
-def _build_life_task_message(plan: dict[str, Any]) -> str:
-    lines = [f"**{plan.get('title', '生活任务计划')}**"]
-    if plan.get("summary"):
-        lines.append(plan["summary"])
-    itinerary = plan.get("itinerary") or []
-    if itinerary:
-        lines.append("**执行时间轴**")
-        for item in itinerary:
-            details = [f"- **{item.get('time', '时间待定')} | {_linked_place(item)}**"]
-            details.append(f"  地址/位置：{item.get('address') or item.get('area') or '待确认'}")
-            if item.get("reason"):
-                details.append(f"  理由：{item['reason']}")
-            points = "；".join(item.get("play_points") or [])
-            if points:
-                details.append(f"  完成标准：{points}")
-            lines.append("\n".join(details))
-    if plan.get("budget"):
-        lines.append(_budget_message(plan["budget"]))
-    confirm = plan.get("confirm_actions") or []
-    if confirm:
-        lines.append("**待确认动作**：" + "；".join(item.get("label", "需要确认") for item in confirm))
-    return "\n\n".join(lines)
 
 
 
@@ -2453,21 +2129,6 @@ def _build_life_task_message(plan: dict[str, Any]) -> str:
 
 
 
-def _living_tips(plan: dict[str, Any], lifestyle: dict[str, list[dict]] | None = None) -> str:
-    city = (plan.get("title") or "").split("轻松")[0].split("一日")[0] or "目的地"
-    itinerary = plan.get("itinerary", [])
-    areas = [item.get("area") for item in itinerary if item.get("area")]
-    area_text = "、".join(dict.fromkeys(areas[:3])) if areas else "主线景点附近"
-    foods = (lifestyle or {}).get("foods", [])
-    hotels = (lifestyle or {}).get("hotels", [])
-    food_text = "、".join(_linked_named_item(item) for item in foods[:3]) if foods else f"{city}本地小吃/特色餐厅"
-    hotel_text = "、".join(_linked_named_item(item) for item in hotels[:3]) if hotels else f"{area_text}或交通枢纽附近酒店"
-    return (
-        "**衣食住行小贴士**："
-        f"穿着以舒适鞋为主，{area_text}之间建议优先地铁/网约车衔接；"
-        f"中午可以考虑 {food_text}，少绕路；"
-        f"如果住一晚，可优先看 {hotel_text}，第二天移动成本更低。"
-    )
 
 
 
@@ -2480,37 +2141,42 @@ def _living_tips(plan: dict[str, Any], lifestyle: dict[str, list[dict]] | None =
 
 
 
-def _extract_city_hint(text: str) -> str | None:
-    known = _first_match(text, KNOWN_CITIES)
-    if known:
-        return known
-    patterns = [
-        r"(?:在|去|到|前往)([\u4e00-\u9fa5]{2,8})(?:轻松|玩|旅游|旅行|一日游|半日|看展|吃饭|办事|跑腿|散步|爬山)",
-        r"([\u4e00-\u9fa5]{2,8})(?:轻松)?(?:玩|旅游|旅行|一日游|半日游|看展|吃饭|办事|跑腿|散步|爬山)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if not match:
-            continue
-        city = _clean_city_hint(match.group(1))
-        if city and city not in PREFERENCE_WORDS and city not in {"附近", "这里", "周边", "海边"}:
-            return city
-    return None
 
 
-def _clean_city_hint(value: str) -> str:
-    value = _clean_place_text(value)
-    value = re.sub(r"^(今天|明天|后天|本周六|本周日|下周六|下周日|这周六|这周日|周六|周日|周末)", "", value)
-    value = re.sub(r"(轻松|紧凑|中等|附近|周边)$", "", value)
-    return value.strip()
 
 
-def _extract_avoid(text: str) -> list[str]:
-    avoid = [word for word in AVOID_WORDS if word in text]
-    for word in PREFERENCE_WORDS:
-        if word in text and _is_negated(text, word):
-            avoid.append(word)
-    return list(dict.fromkeys(avoid))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2549,44 +2215,6 @@ def _infer_task_type(text: str, llm_constraints: dict[str, Any], context: dict[s
 
 
 
-def _extract_errand_items(text: str) -> list[dict[str, Any]]:
-    patterns = [
-        ("取", r"(取|拿)(快递|外卖|文件|药|票|东西)"),
-        ("买", r"买([^，、。,.；;]+)"),
-        ("寄", r"(寄|邮)(快递|文件|包裹|东西)"),
-        ("办", r"(办|办理)([^，、。,.；;]+)"),
-        ("送", r"送([^，、。,.；;]+)"),
-        ("吃饭", r"(吃饭|午饭|晚饭|早餐|早饭)"),
-    ]
-    items: list[dict[str, Any]] = []
-    for action, pattern in patterns:
-        for match in re.finditer(pattern, text):
-            raw = match.group(0)
-            label = raw if len(raw) <= 16 else raw[:16]
-            items.append({
-                "action": action,
-                "title": label,
-                "location_status": "待确认",
-                "duration_minutes": _errand_duration(action),
-                "success_criteria": _errand_success_criteria(action, label),
-            })
-    if not items:
-        items.append({
-            "action": "办",
-            "title": "整理并执行跑腿事项",
-            "location_status": "待确认",
-            "duration_minutes": 45,
-            "success_criteria": "事项完成，凭证/结果已保存",
-        })
-    deduped = []
-    seen = set()
-    for item in items:
-        key = item["title"]
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
-    return deduped[:6]
 
 
 
@@ -2644,52 +2272,12 @@ def _meal_priority(item: dict[str, Any], city: str) -> tuple[int, int, int, int]
 
 
 
-def _is_national_chain_meal(item: dict[str, Any]) -> bool:
-    text = _meal_text(item)
-    return any(word in text for word in NATIONAL_CHAIN_MEAL_WORDS)
 
 
 
 
-def _parse_todo_goal(text: str) -> dict[str, Any]:
-    goal = re.sub(r"(帮我|请|把|拆解|待办|任务列表|todo|to-do)", "", text, flags=re.IGNORECASE).strip(" ，。")
-    goal = goal or "完成这个目标"
-    parts = [part.strip() for part in re.split(r"[，、。；;,.]\s*", goal) if part.strip()]
-    if len(parts) <= 1:
-        tasks = [
-            "明确目标和截止时间",
-            "列出必需资料/资源",
-            "完成第一版产出",
-            "检查遗漏并提交/归档",
-        ]
-    else:
-        tasks = parts[:6]
-    todo_items = [
-        {
-            "title": task,
-            "status": "todo",
-            "duration_minutes": 45 if index else 30,
-            "success_criteria": f"{task}有明确产出或可验证结果",
-        }
-        for index, task in enumerate(tasks)
-    ]
-    return {
-        "goal": goal,
-        "tasks": todo_items,
-        "time_blocks": _todo_time_blocks(todo_items),
-        "acceptance_criteria": [item["success_criteria"] for item in todo_items],
-    }
 
 
-def _todo_time_blocks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    current = 9 * 60
-    blocks = []
-    for task in tasks:
-        start = _time_label(current)
-        current += int(task.get("duration_minutes") or 45)
-        blocks.append({"time": f"{start}-{_time_label(current)}", "title": task["title"]})
-        current += 10
-    return blocks
 
 
 def _timeline_from_errands(items: list[dict[str, Any]], places: list[dict[str, Any]], legs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2782,91 +2370,6 @@ def _infer_goal_from_roles(text: str, city: str | None, roles: dict[str, Any]) -
     return _infer_goal(text, city)
 
 
-def _looks_like_travel_request(text: str) -> bool:
-    return bool(_extract_famous_destination(text)) or any(
-        word in text
-        for word in ["玩", "好玩", "建议", "一日游", "打卡", "景点", "旅游", "路线", "爬山", "登山", "徒步", "看展", "展览", "散步", "前往"]
-    )
-
-
-def _extract_place_roles(text: str, llm_constraints: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    origin_raw = _extract_origin_text(text)
-    destination_raw = _extract_destination_text(text)
-    origin_location = _extract_current_location(text) or (context.get("origin_location") if _mentions_current_area(text) else None)
-    default_city = context.get("default_city")
-    origin_city = context.get("origin_city") or (origin_raw if origin_raw in KNOWN_CITIES else None)
-    explicit_city = _first_match(text, KNOWN_CITIES)
-
-    destination = _resolve_place_role(destination_raw, "destination") if destination_raw else None
-    if destination and _is_broad_region_hint(destination_raw or "") and explicit_city:
-        destination = _resolve_place_role(explicit_city, "destination")
-    if not destination and explicit_city and not _mentions_current_area(text):
-        destination = _resolve_place_role(explicit_city, "destination")
-    if not destination and llm_constraints.get("city") and not _mentions_current_area(text):
-        destination = _resolve_place_role(str(llm_constraints["city"]), "destination")
-
-    origin = None
-    if origin_location:
-        origin = {
-            "raw": origin_raw or "当前位置",
-            "name": origin_raw or origin_city or default_city or "当前位置",
-            "city": origin_city or default_city,
-            "location": origin_location,
-            "source": "browser_location" if context.get("origin_location") else "user_text",
-        }
-    elif origin_raw:
-        origin = _resolve_place_role(origin_raw, "origin")
-
-    activity_area = None
-    if not destination and _mentions_current_area(text):
-        activity_area = origin or ({"raw": default_city, "name": default_city, "city": default_city, "source": "default_city"} if default_city else None)
-
-    route_scope = _route_scope(origin, destination, activity_area)
-    return {
-        "origin": origin,
-        "destination": destination,
-        "activity_area": activity_area,
-        "via_points": [],
-        "activity_intent": _activity_intent(text),
-        "route_scope": route_scope,
-    }
-
-
-def _extract_origin_text(text: str) -> str | None:
-    if any(word in text for word in ["当前位置", "现在这个地方", "我这里", "从这里", "从我这"]):
-        return None
-    patterns = [
-        r"从([\u4e00-\u9fa5A-Za-z0-9·]{2,16})(?:出发|去|到|前往)",
-        r"我在([\u4e00-\u9fa5A-Za-z0-9·]{2,16})(?:，|,|想|要|周|明|今|$)",
-        r"出发地[:：]\s*([\u4e00-\u9fa5A-Za-z0-9·]{2,16})",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return _clean_place_text(match.group(1))
-    return None
-
-
-def _extract_destination_text(text: str) -> str | None:
-    for keyword in FAMOUS_DESTINATIONS:
-        if keyword in text:
-            return keyword
-    explicit_city = _first_match(text, KNOWN_CITIES)
-    if explicit_city and any(word in text for word in ["旅游", "景点", "推荐", "攻略", "查找", "好玩"]):
-        return explicit_city
-    patterns = [
-        r"(?:想去|要去|准备去|计划去|去|到|前往)([\u4e00-\u9fa5A-Za-z0-9·]{2,20})",
-        r"(?:爬|游|逛)([\u4e00-\u9fa5A-Za-z0-9·]{2,16})",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            value = _clean_place_text(match.group(1))
-            if value in PREFERENCE_WORDS and _first_match(text, KNOWN_CITIES):
-                continue
-            if value and not _is_origin_phrase(value):
-                return value
-    return None
 
 
 
@@ -2877,41 +2380,12 @@ def _extract_destination_text(text: str) -> str | None:
 
 
 
-def _resolve_place_role(raw: str, role: str) -> dict[str, Any]:
-    destination = _extract_famous_destination(raw)
-    if destination:
-        anchor = (destination.get("places") or [{}])[0]
-        return {
-            "raw": raw,
-            "name": destination["place"],
-            "city": destination["city"],
-            "type": "scenic_area",
-            "location": anchor.get("location"),
-            "confidence": 0.95,
-            "source": "destination_registry",
-        }
-    city = _city_in_text(raw)
-    name = raw
-    if city and raw != city and raw.startswith(city):
-        name = raw[len(city):] or raw
-    place_type = (
-        "city"
-        if raw == city
-        else "district"
-        if name.endswith(("区", "县"))
-        else "scenic_area"
-        if any(word in raw for word in ["山", "湖", "岛", "湾", "景区", "风景区"])
-        else "poi"
-    )
-    return {
-        "raw": raw,
-        "name": name,
-        "city": city or (raw if raw in KNOWN_CITIES else None),
-        "type": place_type,
-        "location": None,
-        "confidence": 0.75 if city or place_type != "poi" else 0.55,
-        "source": "rule",
-    }
+
+
+
+
+
+
 
 
 
