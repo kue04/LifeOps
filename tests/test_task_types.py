@@ -51,8 +51,9 @@ class TaskTypeTest(unittest.TestCase):
 
         with (
             patch("agent.tool_router.get_weather", return_value={"city": "洛阳", "provider": "mock"}),
+            patch("agent.dynamic_steps.get_weather", return_value={"city": "洛阳", "provider": "mock"}),
             patch("agent.tool_router.search_places", return_value=[]),
-            patch("agent.nodes.search_places", return_value=[]),
+            patch("agent.dynamic_steps.search_places", return_value=[]),
             patch("agent.place_selection.search_places", return_value=[]),
             patch("agent.search.search_places", return_value=[]),
             patch("agent.search.search_web") as search_web,

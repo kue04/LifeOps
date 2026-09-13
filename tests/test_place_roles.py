@@ -204,10 +204,11 @@ class PlaceRolePlanningTest(unittest.TestCase):
     def test_province_hint_with_city_targets_city_core_attractions(self) -> None:
         with (
             patch("agent.tool_router.search_places", return_value=KUNMING_AMAP_PLACES),
-            patch("agent.nodes.search_places", return_value=KUNMING_AMAP_PLACES),
+            patch("agent.dynamic_steps.search_places", return_value=KUNMING_AMAP_PLACES),
             patch("agent.place_selection.search_places", return_value=KUNMING_AMAP_PLACES),
             patch("agent.search.search_places", return_value=KUNMING_AMAP_PLACES),
             patch("agent.tool_router.get_weather", side_effect=fast_weather),
+            patch("agent.dynamic_steps.get_weather", side_effect=fast_weather),
             patch("agent.search.search_web", return_value={"provider": "mock", "query": "昆明 旅游", "results": [], "note": "mock"}),
         ):
             result = run_lifeops("明天去云南 查找昆明旅游景点推荐")
@@ -248,10 +249,11 @@ class PlaceRolePlanningTest(unittest.TestCase):
         }
         with (
             patch("agent.tool_router.search_places", return_value=KUNMING_AMAP_PLACES),
-            patch("agent.nodes.search_places", return_value=KUNMING_AMAP_PLACES),
+            patch("agent.dynamic_steps.search_places", return_value=KUNMING_AMAP_PLACES),
             patch("agent.place_selection.search_places", return_value=KUNMING_AMAP_PLACES),
             patch("agent.search.search_places", return_value=KUNMING_AMAP_PLACES),
             patch("agent.tool_router.get_weather", side_effect=fast_weather),
+            patch("agent.dynamic_steps.get_weather", side_effect=fast_weather),
             patch("agent.search.search_web", return_value=web_result),
         ):
             result = run_lifeops("明天去云南 查找昆明旅游景点推荐")
@@ -310,10 +312,11 @@ class PlaceRolePlanningTest(unittest.TestCase):
         }
         with (
             patch("agent.tool_router.search_places", side_effect=kunming_search_places),
-            patch("agent.nodes.search_places", side_effect=kunming_search_places),
+            patch("agent.dynamic_steps.search_places", side_effect=kunming_search_places),
             patch("agent.place_selection.search_places", side_effect=kunming_search_places),
             patch("agent.search.search_places", side_effect=kunming_search_places),
             patch("agent.tool_router.get_weather", side_effect=fast_weather),
+            patch("agent.dynamic_steps.get_weather", side_effect=fast_weather),
             patch("agent.search.search_web", side_effect=[primary_web, supplemental_web]) as search_web_mock,
         ):
             result = run_lifeops("明天去云南 查找昆明旅游景点推荐")
