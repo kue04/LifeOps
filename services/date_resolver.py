@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-
 WEEKDAY_BY_TEXT = {
     "周一": 0,
     "星期一": 0,

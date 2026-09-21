@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 from agent.graph import run_lifeops
 
-
 MOCK_PLACES = [
     {
         "name": "安静餐厅",
@@ -326,7 +325,7 @@ def fast_weather(city: str, date: str | None = None) -> dict:
 
 class DynamicIntentTest(unittest.TestCase):
     def test_mixed_errand_meal_uses_dynamic_plan(self) -> None:
-        with patch("agent.nodes.search_places", return_value=MOCK_PLACES):
+        with patch("agent.tool_router.search_places", return_value=MOCK_PLACES):
             result = run_lifeops(
                 "明天下午在杭州取快递、买生日礼物，晚上找一家安静餐厅吃饭，预算300",
                 request_context={"default_city": "杭州"},
@@ -360,9 +359,13 @@ class DynamicIntentTest(unittest.TestCase):
 
     def test_travel_dynamic_plan_keeps_travel_tools(self) -> None:
         with (
-            patch("agent.nodes.search_places", return_value=MOCK_PLACES),
-            patch("agent.nodes.get_weather", side_effect=fast_weather),
-            patch("agent.nodes.search_web", return_value={"provider": "mock", "results": [], "note": "mock"}),
+            patch("agent.tool_router.search_places", return_value=MOCK_PLACES),
+            patch("agent.dynamic_steps.search_places", return_value=MOCK_PLACES),
+            patch("agent.place_selection.search_places", return_value=MOCK_PLACES),
+            patch("agent.search.search_places", return_value=MOCK_PLACES),
+            patch("agent.tool_router.get_weather", side_effect=fast_weather),
+            patch("agent.dynamic_steps.get_weather", side_effect=fast_weather),
+            patch("agent.search.search_web", return_value={"provider": "mock", "results": [], "note": "mock"}),
         ):
             result = run_lifeops("周六杭州轻松玩一天，预算500，想看展和夜景")
 
@@ -387,10 +390,14 @@ class DynamicIntentTest(unittest.TestCase):
             ],
         }
         with (
-            patch("agent.nodes._llm_enabled", return_value=False),
-            patch("agent.nodes.search_places", side_effect=hangzhou_search_places),
-            patch("agent.nodes.get_weather", side_effect=fast_weather),
-            patch("agent.nodes.search_web", return_value=web_result),
+            patch("agent.text_utils._llm_enabled", return_value=False),
+            patch("agent.tool_router.search_places", side_effect=hangzhou_search_places),
+            patch("agent.dynamic_steps.search_places", side_effect=hangzhou_search_places),
+            patch("agent.place_selection.search_places", side_effect=hangzhou_search_places),
+            patch("agent.search.search_places", side_effect=hangzhou_search_places),
+            patch("agent.tool_router.get_weather", side_effect=fast_weather),
+            patch("agent.dynamic_steps.get_weather", side_effect=fast_weather),
+            patch("agent.search.search_web", return_value=web_result),
         ):
             result = run_lifeops("明天杭州轻松玩一天，预算500，要看看美食和住宿")
 
@@ -408,10 +415,14 @@ class DynamicIntentTest(unittest.TestCase):
 
     def test_travel_with_hotpot_keeps_meal_and_completed_steps(self) -> None:
         with (
-            patch("agent.nodes._llm_enabled", return_value=False),
-            patch("agent.nodes.search_places", side_effect=chengdu_search_places),
-            patch("agent.nodes.get_weather", side_effect=fast_weather),
-            patch("agent.nodes.search_web", return_value={"provider": "mock", "query": "成都 火锅", "results": [], "note": "mock"}),
+            patch("agent.text_utils._llm_enabled", return_value=False),
+            patch("agent.tool_router.search_places", side_effect=chengdu_search_places),
+            patch("agent.dynamic_steps.search_places", side_effect=chengdu_search_places),
+            patch("agent.place_selection.search_places", side_effect=chengdu_search_places),
+            patch("agent.search.search_places", side_effect=chengdu_search_places),
+            patch("agent.tool_router.get_weather", side_effect=fast_weather),
+            patch("agent.dynamic_steps.get_weather", side_effect=fast_weather),
+            patch("agent.search.search_web", return_value={"provider": "mock", "query": "成都 火锅", "results": [], "note": "mock"}),
         ):
             result = run_lifeops("明天我想要去成都玩 有没有好玩的地方 我还想吃火锅")
 
@@ -424,10 +435,14 @@ class DynamicIntentTest(unittest.TestCase):
 
     def test_meishan_travel_hotpot_uses_live_city_search_shape(self) -> None:
         with (
-            patch("agent.nodes._llm_enabled", return_value=False),
-            patch("agent.nodes.search_places", side_effect=meishan_search_places),
-            patch("agent.nodes.get_weather", side_effect=fast_weather),
-            patch("agent.nodes.search_web", return_value={"provider": "mock", "query": "眉山 火锅", "results": [], "note": "mock"}),
+            patch("agent.text_utils._llm_enabled", return_value=False),
+            patch("agent.tool_router.search_places", side_effect=meishan_search_places),
+            patch("agent.dynamic_steps.search_places", side_effect=meishan_search_places),
+            patch("agent.place_selection.search_places", side_effect=meishan_search_places),
+            patch("agent.search.search_places", side_effect=meishan_search_places),
+            patch("agent.tool_router.get_weather", side_effect=fast_weather),
+            patch("agent.dynamic_steps.get_weather", side_effect=fast_weather),
+            patch("agent.search.search_web", return_value={"provider": "mock", "query": "眉山 火锅", "results": [], "note": "mock"}),
         ):
             result = run_lifeops("想去眉山旅游，吃火锅")
 
@@ -473,10 +488,14 @@ class DynamicIntentTest(unittest.TestCase):
             ],
         }
         with (
-            patch("agent.nodes._llm_enabled", return_value=False),
-            patch("agent.nodes.search_places", side_effect=meishan_search_places),
-            patch("agent.nodes.get_weather", side_effect=fast_weather),
-            patch("agent.nodes.search_web", return_value=web_result),
+            patch("agent.text_utils._llm_enabled", return_value=False),
+            patch("agent.tool_router.search_places", side_effect=meishan_search_places),
+            patch("agent.dynamic_steps.search_places", side_effect=meishan_search_places),
+            patch("agent.place_selection.search_places", side_effect=meishan_search_places),
+            patch("agent.search.search_places", side_effect=meishan_search_places),
+            patch("agent.tool_router.get_weather", side_effect=fast_weather),
+            patch("agent.dynamic_steps.get_weather", side_effect=fast_weather),
+            patch("agent.search.search_web", return_value=web_result),
         ):
             result = run_lifeops("想去眉山旅游，吃火锅")
 

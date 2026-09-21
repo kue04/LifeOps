@@ -5,7 +5,6 @@ from datetime import datetime
 
 from storage.db import connect, init_db
 
-
 DEFAULT_PROFILE = {
     "user_id": "default",
     "likes": ["咖啡", "展览", "夜景"],

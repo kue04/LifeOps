@@ -9,7 +9,6 @@ from uuid import uuid4
 
 from config import settings
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = ROOT / "storage" / "schema.sql"
 

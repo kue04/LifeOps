@@ -1,0 +1,23 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "data",
+    "dist",
+    "htmlcov",
+]
+
+[tool.ruff.lint]
+# 只开启“确定是问题”的规则集：
+#   E4/E7/E9  语法与逻辑类错误
+#   F         pyflakes：未使用导入、未定义名称
+#   I         isort：导入排序
+#   UP        pyupgrade：旧式写法 modernization
+# 暂不开启 E501（长行），现有代码长行过多，逐条修复会淹没真正的重构改动。
+select = ["E4", "E7", "E9", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent", "api", "config", "services", "storage", "tools"]

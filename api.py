@@ -20,16 +20,15 @@ from services.trace_logger import load_trace
 from storage.db import (
     get_profile,
     get_task_history,
+    has_app_confirmation,
     list_app_audit_logs,
     list_task_history,
-    has_app_confirmation,
     record_app_audit,
     record_app_confirmation,
     save_app_run_context,
     save_plan_feedback,
 )
 from tools.calendar import build_ics
-
 
 DEFAULT_FRONTEND_ORIGINS = ",".join([
     "http://localhost:5173",

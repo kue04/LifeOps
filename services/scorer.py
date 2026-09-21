@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 ACTIVE_TAGS = {"爬山", "徒步", "登山", "运动"}
 INDOOR_TAGS = {"室内", "展览", "博物馆", "书店"}
 OUTDOOR_TAGS = {"室外", "散步", "夜景", "公园", "爬山", "徒步", "登山", "运动"}

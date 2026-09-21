@@ -30,7 +30,7 @@ class TaskTypeTest(unittest.TestCase):
     def test_travel_plan_steps_run_place_search_before_web_evidence(self) -> None:
         state = AgentState(user_input="周六洛阳玩一天")
         state.constraints["task_type"] = "travel"
-        with patch("agent.nodes._llm_enabled", return_value=False):
+        with patch("agent.text_utils._llm_enabled", return_value=False):
             state = plan_steps(state)
         tools = [step["tool"] for step in state.plan_steps]
 
@@ -50,9 +50,13 @@ class TaskTypeTest(unittest.TestCase):
         state.constraints.update({"task_type": "travel", "city": "洛阳"})
 
         with (
-            patch("agent.nodes.get_weather", return_value={"city": "洛阳", "provider": "mock"}),
-            patch("agent.nodes.search_places", return_value=[]),
-            patch("agent.nodes.search_web") as search_web,
+            patch("agent.tool_router.get_weather", return_value={"city": "洛阳", "provider": "mock"}),
+            patch("agent.dynamic_steps.get_weather", return_value={"city": "洛阳", "provider": "mock"}),
+            patch("agent.tool_router.search_places", return_value=[]),
+            patch("agent.dynamic_steps.search_places", return_value=[]),
+            patch("agent.place_selection.search_places", return_value=[]),
+            patch("agent.search.search_places", return_value=[]),
+            patch("agent.search.search_web") as search_web,
         ):
             result = travel_tool_router(state)
 

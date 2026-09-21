@@ -6,7 +6,6 @@ from unittest.mock import patch
 import agent.graph as graph
 from agent.state import AgentState
 
-
 SUCCESS_KEYS = {
     "status",
     "trace_id",

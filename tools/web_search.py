@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from html.parser import HTMLParser
-from xml.etree import ElementTree
 from urllib.parse import parse_qs, unquote, urlparse
+from xml.etree import ElementTree
 
 import requests
 
 from config import settings
-
 
 FREE_SEARCH_TIMEOUT_SECONDS = 6
 DUCKDUCKGO_ENDPOINTS = [
